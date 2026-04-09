@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+
+  <defs>
+    <linearGradient id="gdk" x1="0" y1="0" x2="0.4" y2="1" gradientUnits="objectBoundingBox">
+      <stop offset="0%"   stop-color="#FF1464"/>
+      <stop offset="55%"  stop-color="#FF4B7E"/>
+      <stop offset="100%" stop-color="#FF8FAB"/>
+    </linearGradient>
+    <!-- Tight crisp glow -->
+    <filter id="glowdk" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="b1"/>
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5"   result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Wide ambient glow -->
+    <filter id="ambdk" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 0.2 0 0 0
+                0 0 0.3 0 0
+                0 0 0 0.6 0" result="tinted"/>
+      <feMerge>
+        <feMergeNode in="tinted"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Soft drop shadow -->
+    <filter id="shadowdk" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#FF1464" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <!-- Dark background with rounded corners -->
+  <rect width="100" height="100" rx="22" fill="#0D0918"/>
+  <!-- Subtle radial gradient overlay -->
+  <radialGradient id="rbgdk" cx="45%" cy="40%" r="60%">
+    <stop offset="0%"   stop-color="#2A1040" stop-opacity="1"/>
+    <stop offset="100%" stop-color="#0D0918" stop-opacity="1"/>
+  </radialGradient>
+  <rect width="100" height="100" rx="22" fill="url(#rbgdk)"/>
+  <!-- Pink ambient halo -->
+  <ellipse cx="50" cy="50" rx="28" ry="28" fill="#FF1464" opacity="0.06" filter="url(#ambdk)"/>
+
+  <!-- Ambient glow -->
+  <polygon points="58.68,23.96 66.12,23.96 52.48,50.00 59.30,50.00 41.32,76.04 33.88,76.04 47.52,50.00 40.70,50.00" fill="url(#gdk)" opacity="0.35" filter="url(#ambdk)" />
+  <!-- Main bolt + crisp glow -->
+  <polygon points="58.68,23.96 66.12,23.96 52.48,50.00 59.30,50.00 41.32,76.04 33.88,76.04 47.52,50.00 40.70,50.00" fill="url(#gdk)" filter="url(#glowdk)" />
+  <!-- White highlight on upper-left face -->
+  <polygon points="40.70,50.00 58.68,23.96 66.12,23.96 52.48,50.00" fill="white" opacity="0.18" />
+  <!-- Edge shimmer line -->
+  <polygon points="58.68,23.96 66.12,23.96 52.48,50.00 59.30,50.00 41.32,76.04 33.88,76.04 47.52,50.00 40.70,50.00" fill="none" stroke="white" stroke-width="0.6" opacity="0.12" />
+</svg>

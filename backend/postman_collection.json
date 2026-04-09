@@ -1,0 +1,231 @@
+{
+  "info": {
+    "name": "Spark — Happn Clone API",
+    "description": "Full API collection for the Spark location-based social app.\n\nBase URL: {{baseUrl}}\n\nSet the `authToken` variable after login/register — it will be automatically used in all protected routes.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",   "value": "http://localhost:5000/api", "type": "string" },
+    { "key": "authToken", "value": "",                          "type": "string" },
+    { "key": "userId",    "value": "",                          "type": "string" },
+    { "key": "matchId",   "value": "",                          "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Register",
+          "event": [{ "listen": "test", "script": { "exec": ["const d = pm.response.json();", "if (d.token) { pm.collectionVariables.set('authToken', d.token); pm.collectionVariables.set('userId', d.user._id); }"], "type": "text/javascript" } }],
+          "request": {
+            "method": "POST", "header": [], "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth","register"] },
+            "body": { "mode": "raw", "raw": "{\n  \"displayName\": \"Alice\",\n  \"email\": \"alice@example.com\",\n  \"password\": \"password123\",\n  \"age\": 25,\n  \"gender\": \"female\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Login",
+          "event": [{ "listen": "test", "script": { "exec": ["const d = pm.response.json();", "if (d.token) { pm.collectionVariables.set('authToken', d.token); pm.collectionVariables.set('userId', d.user._id); }"], "type": "text/javascript" } }],
+          "request": {
+            "method": "POST", "header": [], "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth","login"] },
+            "body": { "mode": "raw", "raw": "{\n  \"email\": \"alice@example.com\",\n  \"password\": \"password123\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Get Me (profile)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth","me"] }
+          }
+        },
+        {
+          "name": "Update Password",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/auth/update-password", "host": ["{{baseUrl}}"], "path": ["auth","update-password"] },
+            "body": { "mode": "raw", "raw": "{\n  \"currentPassword\": \"password123\",\n  \"newPassword\": \"newpassword456\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get User Profile by ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}", "host": ["{{baseUrl}}"], "path": ["users","{{userId}}"] }
+          }
+        },
+        {
+          "name": "Update My Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/users/me", "host": ["{{baseUrl}}"], "path": ["users","me"] },
+            "body": { "mode": "raw", "raw": "{\n  \"bio\": \"Software engineer who loves hiking\",\n  \"occupation\": \"Engineer\",\n  \"settings\": {\n    \"maxDistance\": 10,\n    \"ageRangeMin\": 22,\n    \"ageRangeMax\": 35,\n    \"showMe\": true,\n    \"notifications\": true\n  }\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Update Location",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/users/me/location", "host": ["{{baseUrl}}"], "path": ["users","me","location"] },
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 48.8566,\n  \"longitude\": 2.3522\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Upload Profile Photo",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/users/me/photos", "host": ["{{baseUrl}}"], "path": ["users","me","photos"] },
+            "body": { "mode": "formdata", "formdata": [{ "key": "photo", "type": "file", "src": "/path/to/photo.jpg" }, { "key": "index", "value": "0", "type": "text" }] }
+          }
+        },
+        {
+          "name": "Delete Profile Photo",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/users/me/photos/0", "host": ["{{baseUrl}}"], "path": ["users","me","photos","0"] }
+          }
+        },
+        {
+          "name": "Block User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/users/{{userId}}/block", "host": ["{{baseUrl}}"], "path": ["users","{{userId}}","block"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Crossings (Location)",
+      "item": [
+        {
+          "name": "Report Location (triggers crossing detection)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/crossings/location", "host": ["{{baseUrl}}"], "path": ["crossings","location"] },
+            "body": { "mode": "raw", "raw": "{\n  \"latitude\": 48.8566,\n  \"longitude\": 2.3522\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Get Crossed Paths Feed",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/crossings?page=1&limit=20", "host": ["{{baseUrl}}"], "path": ["crossings"], "query": [{ "key": "page", "value": "1" }, { "key": "limit", "value": "20" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Likes & Matches",
+      "item": [
+        {
+          "name": "Like a User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/matches/like/{{userId}}", "host": ["{{baseUrl}}"], "path": ["matches","like","{{userId}}"] },
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"liked\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Crush a User (super-like)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/matches/like/{{userId}}", "host": ["{{baseUrl}}"], "path": ["matches","like","{{userId}}"] },
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"crushed\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Pass a User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/matches/like/{{userId}}", "host": ["{{baseUrl}}"], "path": ["matches","like","{{userId}}"] },
+            "body": { "mode": "raw", "raw": "{\n  \"status\": \"passed\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Get My Matches",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/matches", "host": ["{{baseUrl}}"], "path": ["matches"] }
+          }
+        },
+        {
+          "name": "Get Likes Received",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/matches/likes-received", "host": ["{{baseUrl}}"], "path": ["matches","likes-received"] }
+          }
+        },
+        {
+          "name": "Unmatch",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/matches/{{matchId}}", "host": ["{{baseUrl}}"], "path": ["matches","{{matchId}}"] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Messages",
+      "item": [
+        {
+          "name": "Get Messages (paginated)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/messages/{{matchId}}?limit=30", "host": ["{{baseUrl}}"], "path": ["messages","{{matchId}}"], "query": [{ "key": "limit", "value": "30" }] }
+          }
+        },
+        {
+          "name": "Send Text Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/messages/{{matchId}}", "host": ["{{baseUrl}}"], "path": ["messages","{{matchId}}"] },
+            "body": { "mode": "raw", "raw": "{\n  \"text\": \"Hey! I saw we crossed paths near Central Park 👋\"\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Send Image Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authToken}}" }],
+            "url": { "raw": "{{baseUrl}}/messages/{{matchId}}/image", "host": ["{{baseUrl}}"], "path": ["messages","{{matchId}}","image"] },
+            "body": { "mode": "formdata", "formdata": [{ "key": "image", "type": "file", "src": "/path/to/image.jpg" }] }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": { "raw": "http://localhost:5000/health", "protocol": "http", "host": ["localhost"], "port": "5000", "path": ["health"] }
+          }
+        }
+      ]
+    }
+  ]
+}

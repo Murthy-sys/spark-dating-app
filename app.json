@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Spark",
+    "slug": "spark-dating-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#0A0818"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourcompany.sparkapp",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Spark uses your location to show you people you've crossed paths with.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Spark uses your location in the background to detect crossings.",
+        "NSPhotoLibraryUsageDescription": "Spark needs access to your photos to set your profile picture."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F0A19"
+      },
+      "package": "com.yourcompany.sparkapp",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Spark uses your location to show people you've crossed paths with."
+        }
+      ],
+      "@react-native-community/datetimepicker"
+    ],
+    "tasks": [
+      {
+        "taskName": "BACKGROUND_LOCATION_TASK",
+        "taskType": "location"
+      }
+    ]
+  }
+}
