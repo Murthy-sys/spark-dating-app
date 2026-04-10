@@ -1,11 +1,17 @@
 /**
  * UserDetailModal.tsx
  *
- * Full-screen modal showing a user's detail profile with swipeable photos,
- * bio, age, occupation, and action buttons (pass, star, like).
+ * Full-screen profile view matching the reference design:
+ *   • Cream/beige background
+ *   • Name + age in large bold-italic, green "Active" dot
+ *   • Main photo as a tall rounded card
+ *   • Scrollable content: looking-for chip, bio, hobbies chips
+ *   • Additional photos shown one-by-one as cards while scrolling
+ *   • Block / Report at the very bottom
+ *   • Sticky bottom action bar: Boost · Pass · Like · Super-like
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -15,23 +21,88 @@ import {
   StyleSheet,
   Dimensions,
   ScrollView,
-  FlatList,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
+  SafeAreaView,
   StatusBar,
+  Alert,
+  Platform,
 } from 'react-native';
 import { UserProfile } from '../types';
+import { blockUser } from '../services/userService';
 
 const { width, height } = Dimensions.get('window');
 
+const BG        = '#F2ECE4';        // cream background matching reference
+const DARK      = '#1A1A1A';
+const BRAND     = '#FF4B6E';
+const CARD_R    = 20;               // photo card border-radius
+
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
+function timeSince(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins  = Math.floor(diff / 60_000);
+  if (mins < 60)  return 'Active today';
+  const hrs = Math.floor(mins / 60);
+  if (hrs  < 24)  return 'Active today';
+  const days = Math.floor(hrs / 24);
+  if (days < 7)   return `Active ${days}d ago`;
+  return 'Recently active';
+}
+
+const LOOKING_FOR_LABELS: Record<string, string> = {
+  friendship: 'Friendship',
+  casual:     'Casual dating',
+  serious:    'Long-term relationship',
+};
+
+// ─── action button ────────────────────────────────────────────────────────────
+
+function ActionBtn({
+  onPress,
+  bg,
+  children,
+}: {
+  onPress: () => void;
+  bg: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.actionBtn, { backgroundColor: bg }]}
+      onPress={onPress}
+      activeOpacity={0.85}
+    >
+      {children}
+    </TouchableOpacity>
+  );
+}
+
+// ─── section heading ─────────────────────────────────────────────────────────
+
+function SectionHead({ label }: { label: string }) {
+  return <Text style={styles.sectionHead}>{label}</Text>;
+}
+
+// ─── chip ─────────────────────────────────────────────────────────────────────
+
+function Chip({ label, filled }: { label: string; filled?: boolean }) {
+  return (
+    <View style={[styles.chip, filled && styles.chipFilled]}>
+      <Text style={[styles.chipText, filled && styles.chipTextFilled]}>{label}</Text>
+    </View>
+  );
+}
+
+// ─── main component ───────────────────────────────────────────────────────────
+
 interface Props {
-  user: UserProfile;
-  crossing?: { crossingCount: number; crossedAt: string };
-  visible: boolean;
-  onClose: () => void;
-  onLike: () => void;
-  onPass: () => void;
-  onStar: () => void;
+  user:       UserProfile;
+  crossing?:  { crossingCount: number; crossedAt: string };
+  visible:    boolean;
+  onClose:    () => void;
+  onLike:     () => void;
+  onPass:     () => void;
+  onStar:     () => void;
 }
 
 export default function UserDetailModal({
@@ -43,268 +114,358 @@ export default function UserDetailModal({
   onPass,
   onStar,
 }: Props) {
-  const [photoIndex, setPhotoIndex] = useState(0);
+  const [blocked, setBlocked] = useState(false);
 
-  const photos = (user.photos?.length ? user.photos : user.photoURL ? [user.photoURL] : []).filter(Boolean);
+  const photos = (
+    user.photos?.length ? user.photos : user.photoURL ? [user.photoURL] : []
+  ).filter(Boolean);
 
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const idx = Math.round(e.nativeEvent.contentOffset.x / width);
-    setPhotoIndex(idx);
+  const mainPhoto     = photos[0] ?? null;
+  const extraPhotos   = photos.slice(1);
+  const activeLabel   = user.lastSeen ? timeSince(user.lastSeen) : 'Recently active';
+  const lookingForLabels = (user as any).lookingFor
+    ?.map((k: string) => LOOKING_FOR_LABELS[k] ?? k) ?? [];
+
+  // ── block / report ─────────────────────────────────────────────────────────
+  const handleBlock = () => {
+    Alert.alert(
+      'Block user',
+      `Block ${user.displayName}? They won't be able to see you or contact you.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(user._id);
+              setBlocked(true);
+              onClose();
+            } catch {
+              Alert.alert('Error', 'Could not block user. Please try again.');
+            }
+          },
+        },
+      ],
+    );
   };
 
-  const crossedLabel = crossing
-    ? crossing.crossingCount > 1
-      ? `${crossing.crossingCount}× crossed paths`
-      : 'Crossed paths'
-    : null;
+  const handleReport = () => {
+    Alert.alert(
+      'Report user',
+      `Report ${user.displayName} for inappropriate behaviour?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Report & Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(user._id);
+              setBlocked(true);
+              onClose();
+            } catch {
+              Alert.alert('Error', 'Could not report user. Please try again.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  if (blocked) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent={false} statusBarTranslucent presentationStyle="fullScreen">
-      <StatusBar barStyle="light-content" />
-      <View style={styles.container}>
-        {/* Photo Carousel */}
-        <View style={styles.photoContainer}>
-          {photos.length > 0 ? (
-            <FlatList
-              data={photos}
-              horizontal
-              pagingEnabled
-              showsHorizontalScrollIndicator={false}
-              onScroll={onScroll}
-              scrollEventThrottle={16}
-              keyExtractor={(_, i) => String(i)}
-              renderItem={({ item }) => (
-                <View style={styles.photoSlide}>
-                  <Image source={{ uri: item }} style={styles.photo} />
-                </View>
-              )}
-            />
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={false}
+      statusBarTranslucent
+      presentationStyle="fullScreen"
+    >
+      <StatusBar barStyle="dark-content" backgroundColor={BG} />
+      <SafeAreaView style={styles.root}>
+
+        {/* ── top bar ── */}
+        <View style={styles.topBar}>
+          <TouchableOpacity style={styles.topIconBtn} onPress={onClose} activeOpacity={0.7}>
+            <Text style={styles.topIconText}>‹</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ── name + active ── */}
+        <View style={styles.nameRow}>
+          <Text style={styles.nameText}>
+            {user.displayName}, {user.age}
+          </Text>
+          <View style={styles.activeRow}>
+            <View style={styles.activeDot} />
+            <Text style={styles.activeText}>{activeLabel}</Text>
+          </View>
+        </View>
+
+        {/* ── scrollable body ── */}
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* main photo */}
+          {mainPhoto ? (
+            <View style={styles.photoCard}>
+              <Image source={{ uri: mainPhoto }} style={styles.photo} />
+            </View>
           ) : (
-            <View style={[styles.photo, styles.noPhoto]}>
-              <Text style={styles.noPhotoText}>No Photo</Text>
+            <View style={[styles.photoCard, styles.noPhotoCard]}>
+              <Text style={styles.noPhotoText}>No photo yet</Text>
             </View>
           )}
 
-          {/* Photo dots */}
-          {photos.length > 1 && (
-            <View style={styles.dots}>
-              {photos.map((_, i) => (
-                <View
-                  key={i}
-                  style={[styles.dot, i === photoIndex && styles.dotActive]}
-                />
+          {/* looking for */}
+          {lookingForLabels.length > 0 && (
+            <View style={styles.section}>
+              <SectionHead label="Looking for" />
+              <View style={styles.chipRow}>
+                {lookingForLabels.map((l: string) => (
+                  <Chip key={l} label={l} filled />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* bio */}
+          {!!user.bio && (
+            <View style={styles.section}>
+              <SectionHead label="About" />
+              <Text style={styles.bioText}>{user.bio}</Text>
+            </View>
+          )}
+
+          {/* occupation */}
+          {!!user.occupation && (
+            <View style={styles.section}>
+              <SectionHead label="Occupation" />
+              <Text style={styles.bioText}>{user.occupation}</Text>
+            </View>
+          )}
+
+          {/* hobbies */}
+          {(user as any).hobbies?.length > 0 && (
+            <View style={styles.section}>
+              <SectionHead label="Interests" />
+              <View style={styles.chipRow}>
+                {(user as any).hobbies.map((h: string) => (
+                  <Chip key={h} label={h} />
+                ))}
+              </View>
+            </View>
+          )}
+
+          {/* crossing badge */}
+          {crossing && (
+            <View style={styles.crossingBadge}>
+              <Text style={styles.crossingText}>
+                🚶 {crossing.crossingCount > 1
+                  ? `Crossed paths ${crossing.crossingCount} times`
+                  : 'Crossed paths recently'}
+              </Text>
+            </View>
+          )}
+
+          {/* extra photos — one per card */}
+          {extraPhotos.length > 0 && (
+            <View style={styles.section}>
+              <SectionHead label="More photos" />
+              {extraPhotos.map((uri, i) => (
+                <View key={i} style={[styles.photoCard, { marginBottom: 14 }]}>
+                  <Image source={{ uri }} style={styles.photo} />
+                </View>
               ))}
             </View>
           )}
 
-          {/* Close button */}
-          <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
-            <Text style={styles.closeBtnText}>✕</Text>
-          </TouchableOpacity>
+          {/* block / report */}
+          <View style={styles.dangerZone}>
+            <TouchableOpacity style={styles.dangerBtn} onPress={handleBlock} activeOpacity={0.7}>
+              <Text style={styles.dangerBtnText}>🚫  Block {user.displayName}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.dangerBtn} onPress={handleReport} activeOpacity={0.7}>
+              <Text style={[styles.dangerBtnText, { color: '#ef4444' }]}>
+                ⚑  Report {user.displayName}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-          {/* Crossed badge */}
-          {crossedLabel && (
-            <View style={styles.crossedBadge}>
-              <Text style={styles.crossedText}>🚶 {crossedLabel}</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Info */}
-        <ScrollView style={styles.infoContainer} contentContainerStyle={styles.infoContent}>
-          <Text style={styles.name}>
-            {user.displayName}, {user.age}
-          </Text>
-          {user.occupation ? (
-            <Text style={styles.occupation}>{user.occupation}</Text>
-          ) : null}
-          {user.bio ? (
-            <>
-              <Text style={styles.sectionLabel}>About</Text>
-              <Text style={styles.bio}>{user.bio}</Text>
-            </>
-          ) : null}
+          {/* bottom padding for action bar */}
+          <View style={{ height: 24 }} />
         </ScrollView>
 
-        {/* Action Buttons */}
-        <View style={styles.actions}>
-          <TouchableOpacity style={styles.passBtn} onPress={onPass}>
-            <Text style={styles.passIcon}>✕</Text>
-          </TouchableOpacity>
+        {/* ── sticky action bar ── */}
+        <View style={styles.actionBar}>
+          {/* Pass */}
+          <ActionBtn bg={DARK} onPress={onPass}>
+            <Text style={[styles.actionIcon, { color: '#F5A623' }]}>✕</Text>
+          </ActionBtn>
 
-          <TouchableOpacity style={styles.starBtn} onPress={onStar}>
-            <Text style={styles.starIcon}>⭐</Text>
-          </TouchableOpacity>
+          {/* Like */}
+          <ActionBtn bg={DARK} onPress={onLike}>
+            <Text style={[styles.actionIcon, { color: BRAND }]}>♥</Text>
+          </ActionBtn>
 
-          <TouchableOpacity style={styles.likeBtn} onPress={onLike}>
-            <Text style={styles.likeIcon}>❤</Text>
-          </TouchableOpacity>
+          {/* Super-like */}
+          <ActionBtn bg="#C9E8F0" onPress={onStar}>
+            <Text style={[styles.actionIcon, { color: DARK }]}>★</Text>
+          </ActionBtn>
         </View>
-      </View>
+
+        {/* looking-for label beneath buttons */}
+        {lookingForLabels.length > 0 && (
+          <Text style={styles.lookingForLabel}>{lookingForLabels[0]}</Text>
+        )}
+
+      </SafeAreaView>
     </Modal>
   );
 }
 
+// ─── styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: BG,
   },
-  photoContainer: {
-    width,
-    height: height * 0.55,
-    backgroundColor: '#111',
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    overflow: 'hidden',
+
+  /* top bar */
+  topBar: {
+    flexDirection:  'row',
+    justifyContent: 'space-between',
+    alignItems:     'center',
+    paddingHorizontal: 16,
+    paddingTop:     Platform.OS === 'android' ? 12 : 4,
+    paddingBottom:  4,
   },
-  photoSlide: {
-    width,
-    height: height * 0.55,
-    borderBottomLeftRadius: 24,
-    borderBottomRightRadius: 24,
-    overflow: 'hidden',
+  topIconBtn: {
+    width: 40, height: 40, borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  photo: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
+  topIconText: { fontSize: 22, color: DARK },
+
+  /* name */
+  nameRow: { paddingHorizontal: 20, paddingBottom: 12, paddingTop: 4 },
+  nameText: {
+    fontSize:   34,
+    fontWeight: '800',  // '900' + italic has no matching iOS system font variant → crash
+    color:      DARK,
+    letterSpacing: -0.5,
   },
-  noPhoto: {
-    backgroundColor: '#222',
-    alignItems: 'center',
-    justifyContent: 'center',
+  activeRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 },
+  activeDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E' },
+  activeText: { fontSize: 14, color: '#22C55E', fontWeight: '600' },
+
+  /* scroll */
+  scroll:        { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingBottom: 16 },
+
+  /* photo card */
+  photoCard: {
+    width:         '100%',
+    height:        height * 0.52,
+    borderRadius:  CARD_R,
+    overflow:      'hidden',
+    backgroundColor: '#ddd',
+    marginBottom:  18,
+    shadowColor:   '#000',
+    shadowOpacity: 0.10,
+    shadowRadius:  12,
+    shadowOffset:  { width: 0, height: 4 },
+    elevation:     4,
   },
-  noPhotoText: {
-    color: '#666',
-    fontSize: 18,
-  },
-  dots: {
-    position: 'absolute',
-    bottom: 16,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    gap: 6,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.4)',
-  },
-  dotActive: {
-    backgroundColor: '#fff',
-    width: 20,
-  },
-  closeBtn: {
-    position: 'absolute',
-    top: 54,
-    left: 16,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeBtnText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  crossedBadge: {
-    position: 'absolute',
-    top: 54,
-    right: 16,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  crossedText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  infoContainer: {
-    flex: 1,
-  },
-  infoContent: {
-    padding: 20,
-    paddingBottom: 10,
-  },
-  name: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#1a1a1a',
-  },
-  occupation: {
-    fontSize: 16,
-    color: '#888',
-    marginTop: 4,
-  },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#aaa',
+  photo:       { width: '100%', height: '100%', resizeMode: 'cover' },
+  noPhotoCard: { alignItems: 'center', justifyContent: 'center', backgroundColor: '#e5e5e5' },
+  noPhotoText: { color: '#aaa', fontSize: 16 },
+
+  /* section */
+  section:     { marginBottom: 20 },
+  sectionHead: {
+    fontSize:    12,
+    fontWeight:  '700',
+    color:       '#999',
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginTop: 20,
-    marginBottom: 6,
+    letterSpacing: 1,
+    marginBottom: 10,
   },
-  bio: {
-    fontSize: 16,
-    color: '#444',
-    lineHeight: 24,
+
+  /* bio */
+  bioText: { fontSize: 15, color: '#444', lineHeight: 23 },
+
+  /* chips */
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius:  20,
+    borderWidth:   1.5,
+    borderColor:   '#D8D0C8',
+    backgroundColor: 'transparent',
   },
-  actions: {
-    flexDirection: 'row',
+  chipFilled:     { backgroundColor: DARK, borderColor: DARK },
+  chipText:       { fontSize: 13, fontWeight: '600', color: '#555' },
+  chipTextFilled: { color: '#fff' },
+
+  /* crossing */
+  crossingBadge: {
+    backgroundColor:   'rgba(0,0,0,0.06)',
+    borderRadius:      14,
+    paddingHorizontal: 14,
+    paddingVertical:   10,
+    alignSelf:         'flex-start',
+    marginBottom:      20,
+  },
+  crossingText: { fontSize: 13, color: '#666', fontWeight: '600' },
+
+  /* block / report */
+  dangerZone: { gap: 10, marginBottom: 8, marginTop: 8 },
+  dangerBtn: {
+    paddingVertical:   14,
+    borderRadius:      14,
+    backgroundColor:   'rgba(0,0,0,0.04)',
+    alignItems:        'center',
+  },
+  dangerBtnText: { fontSize: 14, fontWeight: '600', color: '#888' },
+
+  /* action bar */
+  actionBar: {
+    flexDirection:     'row',
+    justifyContent:    'center',
+    alignItems:        'center',
+    gap:               14,
+    paddingHorizontal: 20,
+    paddingTop:        14,
+    paddingBottom:     Platform.OS === 'ios' ? 4 : 14,
+    backgroundColor:   BG,
+  },
+  actionBtn: {
+    width:        62,
+    height:       62,
+    borderRadius: 18,
+    alignItems:   'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    gap: 20,
-    paddingVertical: 16,
-    paddingBottom: 50,
-    borderTopWidth: 1,
-    borderTopColor: '#f0f0f0',
-    backgroundColor: '#fff',
+    shadowColor:  '#000',
+    shadowOpacity: 0.12,
+    shadowRadius:  6,
+    shadowOffset:  { width: 0, height: 3 },
+    elevation:     3,
   },
-  passBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
+  actionIcon: { fontSize: 26, color: '#fff' },
+
+  /* looking-for label beneath buttons */
+  lookingForLabel: {
+    textAlign:     'center',
+    fontSize:      13,
+    color:         '#888',
+    fontWeight:    '500',
+    paddingBottom: Platform.OS === 'ios' ? 10 : 16,
+    backgroundColor: BG,
   },
-  passIcon: { fontSize: 22, color: '#aaa' },
-  starBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#FFF8E1',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  starIcon: { fontSize: 24 },
-  likeBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#FF4B6E',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#FF4B6E',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  likeIcon: { fontSize: 26, color: '#fff' },
 });

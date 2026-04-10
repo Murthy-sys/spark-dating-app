@@ -11,8 +11,10 @@ import {
   StyleSheet,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 
 import { useAuthStore } from '../store/authStore';
+import NotificationsPanel from '../components/NotificationsPanel';
 
 // Auth Screens
 import WelcomeScreen        from '../screens/auth/WelcomeScreen';
@@ -58,17 +60,51 @@ function HeaderLogo() {
   );
 }
 
-// ─── Notification Bell (right side) ──────────────────────────────────────────
-function NotificationBell({ count = 0 }: { count?: number }) {
+// ─── Header Right: Bell + Profile Avatar ─────────────────────────────────────
+function HeaderRight() {
+  const profile              = useAuthStore((s) => s.profile);
+  const navigation           = useNavigation<any>();
+  const [panelOpen, setPanelOpen] = useState(false);
+
+  const goToProfile = () => {
+    // Navigate to the Profile tab
+    navigation.navigate('Profile');
+  };
+
   return (
-    <TouchableOpacity style={styles.bellWrapper} activeOpacity={0.7}>
-      <Ionicons name="notifications-outline" size={24} color="#FF4B6E" />
-      {count > 0 && (
-        <View style={styles.badge}>
-          <Text style={styles.badgeText}>{count > 9 ? '9+' : count}</Text>
-        </View>
-      )}
-    </TouchableOpacity>
+    <View style={styles.headerRightRow}>
+      {/* Bell */}
+      <TouchableOpacity
+        style={styles.bellWrapper}
+        onPress={() => setPanelOpen(true)}
+        activeOpacity={0.7}
+      >
+        <Ionicons name="notifications-outline" size={24} color="#FF4B6E" />
+      </TouchableOpacity>
+
+      {/* Profile Avatar */}
+      <TouchableOpacity
+        style={styles.headerAvatarWrap}
+        onPress={goToProfile}
+        activeOpacity={0.85}
+      >
+        {profile?.photoURL ? (
+          <Image source={{ uri: profile.photoURL }} style={styles.headerAvatar} />
+        ) : (
+          <View style={[styles.headerAvatar, styles.headerAvatarFallback]}>
+            <Text style={styles.headerAvatarInitial}>
+              {profile?.displayName?.[0]?.toUpperCase() ?? '?'}
+            </Text>
+          </View>
+        )}
+      </TouchableOpacity>
+
+      {/* Notifications panel (slide-down modal) */}
+      <NotificationsPanel
+        visible={panelOpen}
+        onClose={() => setPanelOpen(false)}
+      />
+    </View>
   );
 }
 
@@ -128,8 +164,6 @@ function ChatNavigator() {
 
 // ─── Main Tab Navigator ───────────────────────────────────────────────────────
 function MainNavigator() {
-  const [notifCount] = useState(0);
-
   return (
     <View style={{ flex: 1 }}>
     <LikeNotification />
@@ -146,10 +180,10 @@ function MainNavigator() {
         },
         headerShadowVisible: false,
 
-        // Logo on the LEFT, bell on the RIGHT — Happn / Tinder pattern
+        // Logo on the LEFT, bell + avatar on the RIGHT
         headerLeft:  () => <HeaderLogo />,
         headerTitle: () => null,          // hide default text title
-        headerRight: () => <NotificationBell count={notifCount} />,
+        headerRight: () => <HeaderRight />,
 
         // ── Tab bar ─────────────────────────────────────────────────────────
         tabBarActiveTintColor:   '#FF4B6E',
@@ -255,26 +289,39 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
   },
 
-  // ── Notification bell ────────────────────────────────────────────────────
+  // ── Header right (bell + avatar) ────────────────────────────────────────
+  headerRightRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    marginRight:   12,
+    gap: 10,
+  },
   bellWrapper: {
-    marginRight: 16,
     padding: 4,
   },
-  badge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    backgroundColor: '#FF4B6E',
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
+
+  // Profile avatar in header
+  headerAvatarWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 2,
+    borderColor: '#FF4B6E',
+    overflow: 'hidden',
+  },
+  headerAvatar: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  headerAvatarFallback: {
+    backgroundColor: '#FFE5EA',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 3,
   },
-  badgeText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: '800',
+  headerAvatarInitial: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FF4B6E',
   },
 });

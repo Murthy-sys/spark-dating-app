@@ -1,4 +1,20 @@
-import React, { useState, useCallback, useEffect } from 'react';
+/**
+ * ProfileScreen.tsx
+ *
+ * Redesigned to match reference:
+ *   – Cream/warm off-white page background
+ *   – Large name heading + Edit button
+ *   – "Basic profile" completion card  (pink progress bar + avatar)
+ *   – "Spark Premium" dark card        (features list + upsell)
+ *   – "My Boosts" feature card
+ *   – "My SuperCrushes" feature card
+ *   – Menu rows: Preferences, Settings, Safety, Help
+ *   – Log Out row
+ *
+ * iOS-safe: no fontStyle italic, fontWeight capped at '800'.
+ */
+
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,70 +26,96 @@ import {
   SafeAreaView,
   Alert,
   ActivityIndicator,
-  FlatList,
+  Platform,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import { updateUserProfile, uploadProfilePhoto } from '../../services/userService';
-import {
-  getLikedUsers,
-  getStarredUsers,
-  unlikeUser as apiUnlikeUser,
-  unstarUser as apiUnstarUser,
-} from '../../services/matchingService';
-import { UserProfile } from '../../types';
+
+// ─── Colours ──────────────────────────────────────────────────────────────────
+
+const PAGE   = '#EDEBE4';   // warm cream — matches reference background
+const WHITE  = '#FFFFFF';
+const BRAND  = '#FF4B6E';   // Spark pink (replaces reference gold)
+const DARK   = '#1A1A1A';
+const GRAY   = '#777777';
+const LGRAY  = '#F2EFE9';   // light cream — icon container bg, borders
+const DGRAY  = '#E5E2DC';   // separator
+
+// ─── Profile-completion helper ────────────────────────────────────────────────
+
+function getCompletion(profile: any): number {
+  let score = 0;
+  if (profile.photoURL || profile.photos?.[0]) score += 30;
+  if (profile.bio?.trim())                     score += 25;
+  if (profile.occupation?.trim())              score += 15;
+  if ((profile.hobbies?.length ?? 0) > 0)     score += 15;
+  if ((profile.lookingFor?.length ?? 0) > 0)  score += 15;
+  return Math.min(score, 100);
+}
+
+function completionMessage(pct: number): string {
+  if (pct < 40)  return 'Add a photo and bio to start getting matches!';
+  if (pct < 70)  return "You're on the verge of standing out. Keep going!";
+  if (pct < 100) return "Almost there! Complete your profile for more matches.";
+  return 'Your profile is complete — you are ready to Spark!';
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+/** White rounded card wrapper */
+function Card({ children, style }: { children: React.ReactNode; style?: any }) {
+  return <View style={[st.card, style]}>{children}</View>;
+}
+
+/** Menu row: icon + label + chevron */
+function MenuRow({
+  iconName,
+  label,
+  onPress,
+  danger,
+}: {
+  iconName: React.ComponentProps<typeof Ionicons>['name'];
+  label:    string;
+  onPress:  () => void;
+  danger?:  boolean;
+}) {
+  return (
+    <TouchableOpacity style={st.menuRow} onPress={onPress} activeOpacity={0.7}>
+      <View style={st.menuIconWrap}>
+        <Ionicons name={iconName} size={20} color={danger ? BRAND : DARK} />
+      </View>
+      <Text style={[st.menuLabel, danger && { color: BRAND }]}>{label}</Text>
+      <Ionicons name="chevron-forward" size={16} color={GRAY} />
+    </TouchableOpacity>
+  );
+}
+
+// ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
   const { profile, setProfile, logout } = useAuthStore();
 
-  const [editing, setEditing]       = useState(false);
-  const [bio, setBio]               = useState(profile?.bio || '');
-  const [occupation, setOccupation] = useState(profile?.occupation || '');
-  const [maxDistance, setMaxDistance] = useState(String(profile?.settings?.maxDistance || 10));
-  const [saving, setSaving]         = useState(false);
-  const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
-
-  // Timestamps per slot — bumped after each upload to bust RN's image cache
-  const [photoVersions, setPhotoVersions] = useState<Record<number, number>>({});
-
-  // — Lists —
-  type ListTab = 'none' | 'liked' | 'starred';
-  const [activeList, setActiveList] = useState<ListTab>('none');
-  const [likedUsers, setLikedUsers] = useState<{ user: UserProfile; starred: boolean }[]>([]);
-  const [starredUsers, setStarredUsers] = useState<UserProfile[]>([]);
-  const [listLoading, setListLoading] = useState(false);
-
-  const loadLiked = useCallback(async () => {
-    setListLoading(true);
-    try { setLikedUsers(await getLikedUsers()); } catch {}
-    setListLoading(false);
-  }, []);
-
-  const loadStarred = useCallback(async () => {
-    setListLoading(true);
-    try { setStarredUsers(await getStarredUsers()); } catch {}
-    setListLoading(false);
-  }, []);
-
-  const handleListTab = (tab: ListTab) => {
-    if (activeList === tab) { setActiveList('none'); return; }
-    setActiveList(tab);
-    if (tab === 'liked') loadLiked();
-    if (tab === 'starred') loadStarred();
-  };
-
-  const handleUnlike = async (userId: string) => {
-    await apiUnlikeUser(userId);
-    setLikedUsers((prev) => prev.filter((l) => l.user._id !== userId));
-  };
-
-  const handleUnstar = async (userId: string) => {
-    await apiUnstarUser(userId);
-    setStarredUsers((prev) => prev.filter((u) => u._id !== userId));
-  };
+  const [editing,        setEditing]        = useState(false);
+  const [bio,            setBio]            = useState(profile?.bio || '');
+  const [occupation,     setOccupation]     = useState(profile?.occupation || '');
+  const [maxDistance,    setMaxDistance]    = useState(
+    String(profile?.settings?.maxDistance || 10),
+  );
+  const [saving,         setSaving]         = useState(false);
+  const [uploadingIdx,   setUploadingIdx]   = useState<number | null>(null);
+  const [photoVersions,  setPhotoVersions]  = useState<Record<number, number>>({});
 
   if (!profile) return null;
 
+  const pct      = getCompletion(profile);
+  const avatarUri =
+    (profile.photos?.[0]
+      ? (photoVersions[0] ? `${profile.photos[0]}?v=${photoVersions[0]}` : profile.photos[0])
+      : undefined) ?? profile.photoURL;
+
+  // ── Save edits ──────────────────────────────────────────────────────────────
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -92,30 +134,23 @@ export default function ProfileScreen() {
     }
   };
 
+  // ── Photo pick ──────────────────────────────────────────────────────────────
   const handlePickPhoto = async (index: number) => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
-      Alert.alert(
-        'Permission required',
-        'Please allow access to your photo library in Settings to upload photos.',
-      );
+      Alert.alert('Permission required', 'Please allow photo library access in Settings.');
       return;
     }
-
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [4, 5],
       quality: 0.8,
     });
-
     if (!result.canceled && result.assets.length > 0) {
       try {
-        setUploadingIndex(index);
-
+        setUploadingIdx(index);
         const serverUrl = await uploadProfilePhoto(result.assets[0].uri, index);
-
-        // Update the profile store with the new URL
         const photos = [...(profile.photos || [])];
         photos[index] = serverUrl;
         setProfile({
@@ -123,17 +158,16 @@ export default function ProfileScreen() {
           photos,
           photoURL: index === 0 ? serverUrl : (profile.photoURL || photos[0]),
         });
-
-        // Bump version so Image re-mounts and bypasses the cache
         setPhotoVersions((prev) => ({ ...prev, [index]: Date.now() }));
       } catch (err: any) {
-        Alert.alert('Upload failed', err?.message ?? 'Could not upload photo. Please try again.');
+        Alert.alert('Upload failed', err?.message ?? 'Could not upload photo.');
       } finally {
-        setUploadingIndex(null);
+        setUploadingIdx(null);
       }
     }
   };
 
+  // ── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -141,474 +175,534 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const photoUrl = (index: number): string | undefined => {
-    const url = profile.photos?.[index];
-    if (!url) return undefined;
-    // Append version as query param to bust RN's image cache after re-upload
-    const version = photoVersions[index];
-    return version ? `${url}?v=${version}` : url;
-  };
+  const comingSoon = (feature: string) =>
+    Alert.alert(feature, `${feature} is coming soon!`);
 
-  const avatarUri = photoUrl(0) || profile.photoURL;
+  // ────────────────────────────────────────────────────────────────────────────
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.inner}>
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <Text style={styles.title}>My Profile</Text>
+    <SafeAreaView style={st.root}>
+      <ScrollView
+        contentContainerStyle={st.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+
+        {/* ── Header: Name + Edit ── */}
+        <View style={st.headerRow}>
+          <View style={st.nameRow}>
+            <Text style={st.nameText} numberOfLines={1}>
+              {profile.displayName}
+            </Text>
+            {/* verified badge (shown when profile ≥ 70% complete) */}
+            {pct >= 70 && (
+              <Ionicons name="checkmark-circle" size={24} color="#4B9EFF" style={{ marginLeft: 6 }} />
+            )}
+          </View>
+
           {editing ? (
-            <TouchableOpacity onPress={handleSave} disabled={saving}>
+            <TouchableOpacity
+              style={st.editBtn}
+              onPress={handleSave}
+              disabled={saving}
+              activeOpacity={0.8}
+            >
               {saving
-                ? <ActivityIndicator size="small" color="#FF4B6E" />
-                : <Text style={styles.saveBtn}>Save</Text>
+                ? <ActivityIndicator size="small" color={WHITE} />
+                : <Text style={st.editBtnText}>Save</Text>
               }
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity onPress={() => setEditing(true)}>
-              <Text style={styles.editBtn}>Edit</Text>
+            <TouchableOpacity style={st.editBtn} onPress={() => setEditing(true)} activeOpacity={0.8}>
+              <Ionicons name="pencil-outline" size={14} color={DARK} style={{ marginRight: 4 }} />
+              <Text style={st.editBtnText}>Edit</Text>
             </TouchableOpacity>
           )}
         </View>
 
-        {/* Main Profile Photo — large tappable avatar */}
-        <TouchableOpacity
-          style={styles.avatarWrapper}
-          onPress={() => handlePickPhoto(0)}
-          disabled={uploadingIndex !== null}
-          activeOpacity={0.8}
-        >
-          {uploadingIndex === 0 ? (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <ActivityIndicator size="large" color="#FF4B6E" />
+        {/* ── Basic Profile completion card ── */}
+        <Card style={{ marginBottom: 14 }}>
+          <View style={st.completionTop}>
+            <View style={{ flex: 1 }}>
+              <Text style={st.cardTitle}>Basic profile</Text>
+              <Text style={st.pctText}>{pct}<Text style={st.pctSymbol}>%</Text></Text>
+              {/* Progress bar */}
+              <View style={st.progressTrack}>
+                <View style={[st.progressFill, { width: `${pct}%` as any }]} />
+              </View>
+              <Text style={st.completionMsg}>{completionMessage(pct)}</Text>
             </View>
-          ) : avatarUri ? (
-            <Image
-              key={avatarUri}           /* force remount on URL change */
-              source={{ uri: avatarUri }}
-              style={styles.avatar}
-            />
-          ) : (
-            <View style={[styles.avatar, styles.avatarPlaceholder]}>
-              <Text style={styles.avatarInitial}>
-                {profile.displayName?.[0]?.toUpperCase() ?? '?'}
+
+            {/* Avatar */}
+            <TouchableOpacity
+              style={st.avatarWrap}
+              onPress={() => handlePickPhoto(0)}
+              disabled={uploadingIdx !== null}
+              activeOpacity={0.85}
+            >
+              {uploadingIdx === 0 ? (
+                <View style={st.avatarInner}>
+                  <ActivityIndicator size="large" color={BRAND} />
+                </View>
+              ) : avatarUri ? (
+                <Image key={avatarUri} source={{ uri: avatarUri }} style={st.avatarInner} />
+              ) : (
+                <View style={[st.avatarInner, st.avatarFallback]}>
+                  <Text style={st.avatarInitial}>
+                    {profile.displayName?.[0]?.toUpperCase() ?? '?'}
+                  </Text>
+                </View>
+              )}
+              {/* camera badge */}
+              <View style={st.cameraBadge}>
+                <Ionicons name="camera" size={11} color={WHITE} />
+              </View>
+            </TouchableOpacity>
+          </View>
+
+          {/* Edit fields (bio + occupation) when editing */}
+          {editing && (
+            <View style={st.editFields}>
+              <Text style={st.fieldLabel}>Bio</Text>
+              <TextInput
+                style={[st.input, st.bioInput]}
+                value={bio}
+                onChangeText={setBio}
+                multiline
+                maxLength={200}
+                placeholder="Write something about yourself…"
+                placeholderTextColor="#BBB"
+              />
+              <Text style={st.fieldLabel}>Occupation</Text>
+              <TextInput
+                style={st.input}
+                value={occupation}
+                onChangeText={setOccupation}
+                placeholder="e.g. Designer"
+                placeholderTextColor="#BBB"
+              />
+              <Text style={st.fieldLabel}>Max discovery distance (km)</Text>
+              <TextInput
+                style={st.input}
+                value={maxDistance}
+                onChangeText={setMaxDistance}
+                keyboardType="number-pad"
+              />
+            </View>
+          )}
+
+          {/* CTA */}
+          {!editing && pct < 100 && (
+            <TouchableOpacity
+              style={st.completionCTA}
+              onPress={() => setEditing(true)}
+              activeOpacity={0.85}
+            >
+              <Text style={st.completionCTAText}>Complete your profile</Text>
+            </TouchableOpacity>
+          )}
+        </Card>
+
+        {/* ── Spark Premium card ── */}
+        <View style={[st.premiumCard, { marginBottom: 14 }]}>
+          <Text style={st.premiumTitle}>Spark Premium</Text>
+          <View style={st.premiumFeatures}>
+            {[
+              'See who likes your profile',
+              'Send unlimited likes',
+              '5 free SuperCrushes every day',
+            ].map((f) => (
+              <View key={f} style={st.featureRow}>
+                <Ionicons name="checkmark" size={16} color={BRAND} style={{ marginRight: 8 }} />
+                <Text style={st.featureText}>{f}</Text>
+              </View>
+            ))}
+          </View>
+          <TouchableOpacity
+            onPress={() => comingSoon('Spark Premium')}
+            activeOpacity={0.8}
+          >
+            <Text style={st.premiumSeeMore}>See my features</Text>
+          </TouchableOpacity>
+          <View style={st.premiumActiveRow}>
+            <Ionicons name="checkmark-circle" size={18} color={BRAND} style={{ marginRight: 6 }} />
+            <Text style={st.premiumActiveText}>Coming soon</Text>
+          </View>
+          {/* decorative swirl */}
+          <Text style={st.swirl}>✦</Text>
+        </View>
+
+        {/* ── My Boosts card ── */}
+        <Card style={{ marginBottom: 10 }}>
+          <View style={st.featureCardRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={st.featureCardTitle}>My Boosts</Text>
+              <Text style={st.featureCardSubtitle}>
+                Your visibility will skyrocket for 24h
               </Text>
-            </View>
-          )}
-          <View style={styles.cameraBadge}>
-            <Text style={styles.cameraIcon}>📷</Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* Photo Grid */}
-        <Text style={styles.sectionLabel}>Photos</Text>
-        <View style={styles.photoGrid}>
-          {Array.from({ length: 6 }).map((_, i) => {
-            const slotUri = photoUrl(i);
-            return (
               <TouchableOpacity
-                key={i}
-                style={[styles.photoSlot, i === 0 && styles.photoSlotPrimary]}
-                onPress={() => handlePickPhoto(i)}
-                disabled={uploadingIndex !== null}
+                style={st.featureChip}
+                onPress={() => comingSoon('Boosts')}
+                activeOpacity={0.8}
               >
-                {uploadingIndex === i ? (
-                  <ActivityIndicator size="small" color="#FF4B6E" />
-                ) : slotUri ? (
-                  <>
-                    <Image
-                      key={slotUri}     /* force remount on URL change */
-                      source={{ uri: slotUri }}
-                      style={styles.photo}
-                    />
-                    {i === 0 && (
-                      <View style={styles.primaryBadge}>
-                        <Text style={styles.primaryBadgeText}>Main</Text>
-                      </View>
-                    )}
-                    <View style={styles.editOverlay}>
-                      <Text style={styles.editOverlayText}>✎</Text>
-                    </View>
-                  </>
-                ) : (
-                  <View style={styles.addPhotoInner}>
-                    <Text style={styles.photoAdd}>+</Text>
-                    <Text style={styles.photoAddLabel}>
-                      {i === 0 ? 'Main photo' : 'Add photo'}
-                    </Text>
-                  </View>
-                )}
+                <Text style={st.featureChipText}>Get a Boost</Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Name & Age */}
-        <Text style={styles.name}>
-          {profile.displayName}, {profile.age}
-        </Text>
-        {profile.occupation ? (
-          <Text style={styles.occupation}>{profile.occupation}</Text>
-        ) : null}
-
-        {/* Bio */}
-        <Text style={styles.sectionLabel}>About me</Text>
-        {editing ? (
-          <TextInput
-            style={[styles.input, styles.bioInput]}
-            value={bio}
-            onChangeText={setBio}
-            multiline
-            maxLength={200}
-            placeholder="Write something about yourself…"
-            placeholderTextColor="#aaa"
-          />
-        ) : (
-          <Text style={styles.bioText}>{bio || 'No bio yet. Tap Edit to add one.'}</Text>
-        )}
-
-        {editing && (
-          <>
-            <Text style={styles.sectionLabel}>Occupation</Text>
-            <TextInput
-              style={styles.input}
-              value={occupation}
-              onChangeText={setOccupation}
-              placeholder="e.g. Designer"
-              placeholderTextColor="#aaa"
-            />
-          </>
-        )}
-
-        {/* Settings */}
-        <Text style={styles.sectionLabel}>Discovery settings</Text>
-        <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Max distance</Text>
-          {editing ? (
-            <TextInput
-              style={styles.settingInput}
-              value={maxDistance}
-              onChangeText={setMaxDistance}
-              keyboardType="number-pad"
-            />
-          ) : (
-            <Text style={styles.settingValue}>{profile.settings?.maxDistance} km</Text>
-          )}
-        </View>
-        <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Age range</Text>
-          <Text style={styles.settingValue}>
-            {profile.settings?.ageRangeMin}–{profile.settings?.ageRangeMax}
-          </Text>
-        </View>
-
-        {/* Liked & Starred */}
-        <Text style={styles.sectionLabel}>My Activity</Text>
-        <View style={styles.listTabs}>
-          <TouchableOpacity
-            style={[styles.listTab, activeList === 'liked' && styles.listTabActive]}
-            onPress={() => handleListTab('liked')}
-          >
-            <Text style={[styles.listTabText, activeList === 'liked' && styles.listTabTextActive]}>
-              ❤ Liked
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.listTab, activeList === 'starred' && styles.listTabActive]}
-            onPress={() => handleListTab('starred')}
-          >
-            <Text style={[styles.listTabText, activeList === 'starred' && styles.listTabTextActive]}>
-              ⭐ Favorites
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {activeList !== 'none' && (
-          <View style={styles.listSection}>
-            {listLoading ? (
-              <ActivityIndicator size="small" color="#FF4B6E" style={{ padding: 20 }} />
-            ) : activeList === 'liked' ? (
-              likedUsers.length === 0 ? (
-                <Text style={styles.listEmpty}>You haven't liked anyone yet.</Text>
-              ) : (
-                likedUsers.map((item) => (
-                  <View key={item.user._id} style={styles.listCard}>
-                    <Image
-                      source={{ uri: item.user.photoURL || undefined }}
-                      style={styles.listPhoto}
-                    />
-                    <View style={styles.listInfo}>
-                      <Text style={styles.listName}>{item.user.displayName}, {item.user.age}</Text>
-                      {item.user.occupation ? <Text style={styles.listOcc}>{item.user.occupation}</Text> : null}
-                    </View>
-                    <TouchableOpacity
-                      style={styles.listRemoveBtn}
-                      onPress={() => handleUnlike(item.user._id)}
-                    >
-                      <Text style={styles.listRemoveText}>Unlike</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )
-            ) : (
-              starredUsers.length === 0 ? (
-                <Text style={styles.listEmpty}>No favorites yet.</Text>
-              ) : (
-                starredUsers.map((u) => (
-                  <View key={u._id} style={styles.listCard}>
-                    <Image
-                      source={{ uri: u.photoURL || undefined }}
-                      style={styles.listPhoto}
-                    />
-                    <View style={styles.listInfo}>
-                      <Text style={styles.listName}>{u.displayName}, {u.age}</Text>
-                      {u.occupation ? <Text style={styles.listOcc}>{u.occupation}</Text> : null}
-                    </View>
-                    <TouchableOpacity
-                      style={styles.listRemoveBtn}
-                      onPress={() => handleUnstar(u._id)}
-                    >
-                      <Text style={styles.listRemoveText}>Unstar</Text>
-                    </TouchableOpacity>
-                  </View>
-                ))
-              )
-            )}
+            </View>
+            <Text style={st.featureEmoji}>⚡</Text>
           </View>
-        )}
+        </Card>
 
-        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-          <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
+        {/* ── My SuperCrushes card ── */}
+        <Card style={{ marginBottom: 22 }}>
+          <View style={st.featureCardRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={st.featureCardTitle}>My SuperCrushes</Text>
+              <Text style={st.featureCardSubtitle}>
+                5x more chances of finding a date
+              </Text>
+              <View style={st.superChip}>
+                <Text style={st.superChipText}>5 SuperCrushes left</Text>
+              </View>
+            </View>
+            <Text style={[st.featureEmoji, { color: '#5FB8FF' }]}>★</Text>
+          </View>
+        </Card>
+
+        {/* ── Menu rows ── */}
+        <View style={st.menuSection}>
+          <MenuRow
+            iconName="options-outline"
+            label="Preferences"
+            onPress={() => comingSoon('Preferences')}
+          />
+          <View style={st.menuSep} />
+          <MenuRow
+            iconName="settings-outline"
+            label="Settings"
+            onPress={() => comingSoon('Settings')}
+          />
+          <View style={st.menuSep} />
+          <MenuRow
+            iconName="shield-checkmark-outline"
+            label="Safety guide"
+            onPress={() => comingSoon('Safety guide')}
+          />
+          <View style={st.menuSep} />
+          <MenuRow
+            iconName="help-circle-outline"
+            label="Help center"
+            onPress={() => comingSoon('Help center')}
+          />
+        </View>
+
+        {/* ── Log Out ── */}
+        <View style={[st.menuSection, { marginTop: 16, marginBottom: 36 }]}>
+          <MenuRow
+            iconName="log-out-outline"
+            label="Log Out"
+            onPress={handleLogout}
+            danger
+          />
+        </View>
+
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f8f8' },
-  inner:     { padding: 20, paddingBottom: 80 },
-  headerRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  title:   { fontSize: 24, fontWeight: '800', color: '#1a1a1a' },
-  editBtn: { fontSize: 16, color: '#FF4B6E', fontWeight: '600' },
-  saveBtn: { fontSize: 16, color: '#FF4B6E', fontWeight: '700' },
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
-  // Avatar
-  avatarWrapper: {
-    alignSelf: 'center',
-    marginBottom: 16,
-    position: 'relative',
+const st = StyleSheet.create({
+  root:   { flex: 1, backgroundColor: PAGE },
+  scroll: { paddingHorizontal: 16, paddingTop: Platform.OS === 'android' ? 16 : 8, paddingBottom: 20 },
+
+  /* ── Header row ── */
+  headerRow: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+    marginBottom:   20,
+    marginTop:      8,
   },
-  avatar: {
-    width: 110,
-    height: 110,
-    borderRadius: 55,
-    resizeMode: 'cover',
-    borderWidth: 3,
-    borderColor: '#FF4B6E',
+  nameRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    flex: 1,
   },
-  avatarPlaceholder: {
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
-    justifyContent: 'center',
+  nameText: {
+    fontSize:      34,
+    fontWeight:    '800',
+    color:         DARK,
+    letterSpacing: -0.5,
   },
-  avatarInitial: { fontSize: 40, fontWeight: '700', color: '#ccc' },
-  cameraBadge: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 3,
+  editBtn: {
+    flexDirection:    'row',
+    alignItems:       'center',
+    backgroundColor:  WHITE,
+    borderRadius:     20,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
+    // shadow
+    shadowColor:   '#000',
+    shadowOpacity: 0.08,
+    shadowOffset:  { width: 0, height: 2 },
+    shadowRadius:  6,
     elevation: 3,
   },
-  cameraIcon: { fontSize: 15 },
+  editBtnText: { fontSize: 14, fontWeight: '600', color: DARK },
 
-  // Photo grid
-  photoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 20,
+  /* ── Generic card ── */
+  card: {
+    backgroundColor:  WHITE,
+    borderRadius:     20,
+    padding:          18,
+    shadowColor:      '#000',
+    shadowOpacity:    0.06,
+    shadowOffset:     { width: 0, height: 2 },
+    shadowRadius:     8,
+    elevation: 2,
   },
-  photoSlot: {
-    width: '30.5%',
-    aspectRatio: 4 / 5,
-    borderRadius: 12,
-    borderWidth: 2,
-    borderColor: '#e5e5e5',
-    borderStyle: 'dashed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-  },
-  photoSlotPrimary: { borderColor: '#FF4B6E', borderStyle: 'solid' },
-  photo: { width: '100%', height: '100%', resizeMode: 'cover' },
-  primaryBadge: {
-    position: 'absolute',
-    top: 6,
-    left: 6,
-    backgroundColor: '#FF4B6E',
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
-  primaryBadgeText: { color: '#fff', fontSize: 9, fontWeight: '700' },
-  editOverlay: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  editOverlayText: { color: '#fff', fontSize: 14 },
-  addPhotoInner:   { alignItems: 'center' },
-  photoAdd:        { fontSize: 28, color: '#ccc' },
-  photoAddLabel:   { fontSize: 10, color: '#bbb', marginTop: 2 },
-
-  // Text
-  name:       { fontSize: 22, fontWeight: '700', color: '#1a1a1a' },
-  occupation: { fontSize: 15, color: '#888', marginTop: 2, marginBottom: 16 },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#888',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginTop: 20,
+  cardTitle: {
+    fontSize:   14,
+    fontWeight: '600',
+    color:      GRAY,
     marginBottom: 8,
+  },
+
+  /* ── Completion card ── */
+  completionTop: {
+    flexDirection: 'row',
+    alignItems:    'flex-start',
+    gap:           12,
+  },
+  pctText: {
+    fontSize:   48,
+    fontWeight: '800',
+    color:      BRAND,
+    lineHeight: 54,
+  },
+  pctSymbol: {
+    fontSize:   24,
+    fontWeight: '700',
+    color:      BRAND,
+  },
+  progressTrack: {
+    height:          6,
+    backgroundColor: LGRAY,
+    borderRadius:    3,
+    marginVertical:  10,
+    overflow:        'hidden',
+  },
+  progressFill: {
+    height:          6,
+    backgroundColor: BRAND,
+    borderRadius:    3,
+  },
+  completionMsg: {
+    fontSize:   13,
+    color:      GRAY,
+    lineHeight: 18,
+    marginTop:  4,
+  },
+
+  /* Avatar in completion card */
+  avatarWrap: {
+    position:     'relative',
+    width:         76,
+    height:        76,
+    flexShrink:    0,
+  },
+  avatarInner: {
+    width:        76,
+    height:       76,
+    borderRadius: 16,
+    resizeMode:   'cover',
+    borderWidth:  2.5,
+    borderColor:  BRAND,
+    overflow:     'hidden',
+  },
+  avatarFallback: {
+    backgroundColor: LGRAY,
+    alignItems:      'center',
+    justifyContent:  'center',
+  },
+  avatarInitial: { fontSize: 28, fontWeight: '700', color: BRAND },
+  cameraBadge: {
+    position:        'absolute',
+    bottom:          -4,
+    right:           -4,
+    width:           22,
+    height:          22,
+    borderRadius:    11,
+    backgroundColor: BRAND,
+    alignItems:      'center',
+    justifyContent:  'center',
+    borderWidth:     2,
+    borderColor:     WHITE,
+  },
+
+  /* Edit fields */
+  editFields: { marginTop: 16 },
+  fieldLabel: {
+    fontSize:   12,
+    fontWeight: '600',
+    color:      GRAY,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom:  6,
+    marginTop:     12,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-    borderRadius: 12,
+    borderWidth:       1,
+    borderColor:       DGRAY,
+    borderRadius:      12,
     paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    backgroundColor: '#fff',
-    color: '#1a1a1a',
+    paddingVertical:   10,
+    fontSize:          15,
+    backgroundColor:   LGRAY,
+    color:             DARK,
   },
-  bioInput:  { height: 80, textAlignVertical: 'top' },
-  bioText:   { fontSize: 15, color: '#555', lineHeight: 22 },
-  settingRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  settingLabel: { fontSize: 15, color: '#333' },
-  settingValue: { fontSize: 15, color: '#FF4B6E', fontWeight: '600' },
-  settingInput: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#FF4B6E',
-    fontSize: 15,
-    color: '#FF4B6E',
-    minWidth: 50,
-    textAlign: 'right',
-  },
-  logoutBtn: {
-    marginTop: 32,
-    padding: 16,
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: '#FF4B6E',
-    alignItems: 'center',
-  },
-  logoutText: { fontSize: 16, color: '#FF4B6E', fontWeight: '600' },
+  bioInput: { height: 80, textAlignVertical: 'top' },
 
-  // List tabs
-  listTabs: {
+  /* CTA button inside completion card */
+  completionCTA: {
+    marginTop:       16,
+    backgroundColor: DARK,
+    borderRadius:    30,
+    paddingVertical: 14,
+    alignItems:      'center',
+  },
+  completionCTAText: {
+    color:      WHITE,
+    fontSize:   15,
+    fontWeight: '700',
+  },
+
+  /* ── Premium card ── */
+  premiumCard: {
+    backgroundColor: DARK,
+    borderRadius:    20,
+    padding:         20,
+    borderWidth:     1.5,
+    borderColor:     BRAND,
+    overflow:        'hidden',
+    shadowColor:     '#000',
+    shadowOpacity:   0.18,
+    shadowOffset:    { width: 0, height: 4 },
+    shadowRadius:    12,
+    elevation: 6,
+  },
+  premiumTitle: {
+    fontSize:      26,
+    fontWeight:    '800',
+    color:         WHITE,
+    marginBottom:  14,
+  },
+  premiumFeatures: { marginBottom: 10 },
+  featureRow: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems:    'center',
+    marginBottom:  8,
+  },
+  featureText: { fontSize: 14, color: WHITE, fontWeight: '500' },
+  premiumSeeMore: {
+    fontSize:     13,
+    color:        GRAY,
+    marginBottom: 14,
+  },
+  premiumActiveRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+  },
+  premiumActiveText: {
+    fontSize:   14,
+    fontWeight: '700',
+    color:      BRAND,
+  },
+  swirl: {
+    position:  'absolute',
+    right:     20,
+    bottom:    16,
+    fontSize:  60,
+    color:     BRAND,
+    opacity:   0.18,
+  },
+
+  /* ── Feature cards (Boosts / SuperCrushes) ── */
+  featureCardRow: {
+    flexDirection: 'row',
+    alignItems:    'center',
+    gap:           12,
+  },
+  featureCardTitle: {
+    fontSize:     18,
+    fontWeight:   '700',
+    color:        DARK,
+    marginBottom: 4,
+  },
+  featureCardSubtitle: {
+    fontSize:     13,
+    color:        GRAY,
     marginBottom: 12,
+    lineHeight:   18,
   },
-  listTab: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#f0f0f0',
-    alignItems: 'center',
+  featureEmoji: {
+    fontSize: 42,
+    color:    '#FF7043',   // orange for boost
   },
-  listTabActive: {
-    backgroundColor: '#FF4B6E',
+  featureChip: {
+    alignSelf:         'flex-start',
+    backgroundColor:   LGRAY,
+    borderRadius:      20,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
+    borderWidth:       1,
+    borderColor:       DGRAY,
   },
-  listTabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#888',
+  featureChipText: { fontSize: 13, fontWeight: '600', color: DARK },
+  superChip: {
+    alignSelf:         'flex-start',
+    backgroundColor:   '#DDF0FF',
+    borderRadius:      20,
+    paddingHorizontal: 14,
+    paddingVertical:   8,
   },
-  listTabTextActive: {
-    color: '#fff',
-  },
-  listSection: {
-    marginBottom: 8,
-  },
-  listEmpty: {
-    fontSize: 14,
-    color: '#aaa',
-    textAlign: 'center',
-    paddingVertical: 20,
-  },
-  listCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 10,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
+  superChipText: { fontSize: 13, fontWeight: '600', color: '#3A8BCC' },
+
+  /* ── Menu section ── */
+  menuSection: {
+    backgroundColor: WHITE,
+    borderRadius:    20,
+    overflow:        'hidden',
+    shadowColor:     '#000',
+    shadowOpacity:   0.05,
+    shadowOffset:    { width: 0, height: 1 },
+    shadowRadius:    6,
     elevation: 1,
   },
-  listPhoto: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#eee',
+  menuRow: {
+    flexDirection:     'row',
+    alignItems:        'center',
+    paddingHorizontal: 16,
+    paddingVertical:   16,
   },
-  listInfo: {
-    flex: 1,
-    marginHorizontal: 12,
+  menuIconWrap: {
+    width:            40,
+    height:           40,
+    borderRadius:     12,
+    backgroundColor:  LGRAY,
+    alignItems:       'center',
+    justifyContent:   'center',
+    marginRight:      14,
   },
-  listName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#1a1a1a',
+  menuLabel: {
+    flex:       1,
+    fontSize:   16,
+    fontWeight: '500',
+    color:      DARK,
   },
-  listOcc: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 2,
-  },
-  listRemoveBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#FF4B6E',
-  },
-  listRemoveText: {
-    fontSize: 12,
-    color: '#FF4B6E',
-    fontWeight: '600',
+  menuSep: {
+    height:      1,
+    backgroundColor: DGRAY,
+    marginLeft:  70,
   },
 });

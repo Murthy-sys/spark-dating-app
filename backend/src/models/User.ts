@@ -80,7 +80,7 @@ const UserSchema = new Schema<IUser>(
     },
     interestedIn: {
       type:    [String],
-      default: ['male', 'female'],
+      default: ['male', 'female', 'non-binary', 'other'],
       enum:    ['male', 'female', 'non-binary', 'other'],
     },
     occupation:  { type: String,   default: '', trim: true },

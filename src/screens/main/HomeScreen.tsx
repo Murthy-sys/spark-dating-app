@@ -12,13 +12,11 @@ import {
   Image,
   StyleSheet,
   SafeAreaView,
-  RefreshControl,
   ActivityIndicator,
   Animated,
   Dimensions,
   TouchableOpacity,
   Alert,
-  FlatList,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 import { getCrossedPathsUsers, getNearbyUsers, likeUser, passUser, starUser } from '../../services/matchingService';
@@ -132,6 +130,19 @@ export default function HomeScreen() {
             ? `${feed.length} people nearby`
             : 'Acquiring location…'}
         </Text>
+        {/* Refresh button — replaces refreshControl which crashes on iOS
+            when used with a horizontal FlatList */}
+        <TouchableOpacity
+          onPress={onRefresh}
+          disabled={refreshing}
+          style={styles.refreshBtn}
+          activeOpacity={0.7}
+        >
+          {refreshing
+            ? <ActivityIndicator size="small" color="#FF4B6E" />
+            : <Text style={styles.refreshIcon}>↻</Text>
+          }
+        </TouchableOpacity>
       </View>
 
       {locationError ? (
@@ -169,9 +180,6 @@ export default function HomeScreen() {
             { useNativeDriver: true }
           )}
           scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF4B6E" />
-          }
           renderItem={({ item, index }: { item: FeedItem; index: number }) => {
             const inputRange = [
               (index - 1) * (CARD_WIDTH + CARD_SPACING),
@@ -297,13 +305,18 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f8f8' },
   center:    { flex: 1, justifyContent: 'center', alignItems: 'center' },
   subHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 8,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  headerSub: { fontSize: 13, color: '#999' },
+  headerSub:   { fontSize: 13, color: '#999' },
+  refreshBtn:  { padding: 4 },
+  refreshIcon: { fontSize: 20, color: '#FF4B6E', fontWeight: '600' },
   locationWarning: {
     backgroundColor: '#FFF3CD',
     paddingHorizontal: 16,

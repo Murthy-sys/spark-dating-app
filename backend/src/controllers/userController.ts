@@ -171,11 +171,19 @@ export async function getNearbyUsers(req: AuthRequest, res: Response, next: Next
     const me     = req.user!;
     const limit  = Math.min(Number(req.query.limit)  || 1000, 1000);
 
-    // Build gender filter only when interestedIn is non-empty.
-    const genderFilter =
-      Array.isArray(me.interestedIn) && me.interestedIn.length > 0
-        ? { gender: { $in: me.interestedIn } }
-        : {};
+    // Build gender filter only when the user has a real preference
+    // (i.e. not the default "all genders" setting). If all 4 genders are
+    // included — or interestedIn is empty — skip the filter so every user
+    // shows up. This also prevents test accounts (gender:'other') being
+    // hidden from users whose interestedIn is still ['male','female'].
+    const ALL_GENDERS = ['male', 'female', 'non-binary', 'other'];
+    const hasSpecificPreference =
+      Array.isArray(me.interestedIn) &&
+      me.interestedIn.length > 0 &&
+      me.interestedIn.length < ALL_GENDERS.length;
+    const genderFilter = hasSpecificPreference
+      ? { gender: { $in: me.interestedIn } }
+      : {};
 
     // Only apply age filter when sensible defaults exist.
     const ageMin = me.settings?.ageRangeMin ?? 18;
@@ -189,7 +197,7 @@ export async function getNearbyUsers(req: AuthRequest, res: Response, next: Next
       ...genderFilter,
     })
       .limit(limit)
-      .select('displayName photoURL photos bio age gender occupation lastSeen location');
+      .select('displayName photoURL photos bio age gender occupation hobbies lookingFor lastSeen location');
 
     res.json({ success: true, data: nearbyUsers, count: nearbyUsers.length });
   } catch (err) {
