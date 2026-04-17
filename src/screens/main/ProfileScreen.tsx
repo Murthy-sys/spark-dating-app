@@ -32,6 +32,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 import { updateUserProfile, uploadProfilePhoto } from '../../services/userService';
+import PreferencesModal from '../../components/PreferencesModal';
 
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
@@ -103,9 +104,10 @@ export default function ProfileScreen() {
   const [maxDistance,    setMaxDistance]    = useState(
     String(profile?.settings?.maxDistance || 10),
   );
-  const [saving,         setSaving]         = useState(false);
-  const [uploadingIdx,   setUploadingIdx]   = useState<number | null>(null);
-  const [photoVersions,  setPhotoVersions]  = useState<Record<number, number>>({});
+  const [saving,           setSaving]          = useState(false);
+  const [uploadingIdx,     setUploadingIdx]     = useState<number | null>(null);
+  const [photoVersions,    setPhotoVersions]    = useState<Record<number, number>>({});
+  const [showPreferences,  setShowPreferences]  = useState(false);
 
   if (!profile) return null;
 
@@ -372,7 +374,7 @@ export default function ProfileScreen() {
           <MenuRow
             iconName="options-outline"
             label="Preferences"
-            onPress={() => comingSoon('Preferences')}
+            onPress={() => setShowPreferences(true)}
           />
           <View style={st.menuSep} />
           <MenuRow
@@ -405,6 +407,13 @@ export default function ProfileScreen() {
         </View>
 
       </ScrollView>
+
+      {/* Preferences full-screen modal */}
+      <PreferencesModal
+        visible={showPreferences}
+        onClose={() => setShowPreferences(false)}
+      />
+
     </SafeAreaView>
   );
 }

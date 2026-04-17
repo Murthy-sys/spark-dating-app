@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import Match from '../models/Match';
 import Message from '../models/Message';
 import { AuthRequest } from '../middleware/auth';
-import { uploadToCloudinary } from '../middleware/upload';
+import { uploadImage } from '../middleware/upload';
 
 // ─── Get Messages for a Match ─────────────────────────────────────────────────
 
@@ -79,7 +79,11 @@ export async function sendImageMessage(req: AuthRequest, res: Response, next: Ne
     const match = await Match.findOne({ _id: matchId, users: myId, isActive: true });
     if (!match) return res.status(403).json({ success: false, message: 'Not authorized' });
 
-    const { url } = await uploadToCloudinary(req.file.buffer, `spark/chat/${matchId}`);
+    // Use uploadImage (not uploadToCloudinary) so it falls back to local disk
+    // when Cloudinary env vars are not configured.
+    const baseUrl   = `${req.protocol}://${req.get('host')}`;
+    const publicId  = `chat_${matchId}_${Date.now()}`;
+    const { url }   = await uploadImage(req.file.buffer, publicId, 'spark/chat', baseUrl);
 
     const message = await Message.create({
       match: matchId,

@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Image,
+  Alert,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -113,18 +114,30 @@ export default function ChatScreen({ route }: Props) {
   };
 
   const handlePickImage = async () => {
+    // Request photo library permission before opening picker
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission required',
+        'Please allow access to your photo library in Settings to send images.',
+      );
+      return;
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],   // modern API (MediaTypeOptions is deprecated)
       quality: 0.7,
     });
-    if (!result.canceled && profile) {
+
+    if (!result.canceled && result.assets.length > 0 && profile) {
       setSending(true);
       try {
         const savedMsg = await sendImageMessage(matchId, result.assets[0].uri);
         addMessages(savedMsg);
         setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-      } catch (err) {
+      } catch (err: any) {
         console.error('[ChatScreen] Failed to send image:', err);
+        Alert.alert('Upload failed', err?.message ?? 'Could not send image. Please try again.');
       } finally {
         setSending(false);
       }
