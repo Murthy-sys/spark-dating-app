@@ -4,6 +4,78 @@ import Match from '../models/Match';
 import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { getIO } from '../socket';
+import {
+  DAILY_LIKE_LIMIT,
+  AUTO_UNMATCH_MS,
+  ENGAGE_GHOSTED,
+  nextMidnight,
+} from '../constants/limits';
+
+// ─── Daily-like accounting ────────────────────────────────────────────────────
+
+/**
+ * Returns the user's current daily-like state, resetting the counter when the
+ * window has rolled over. Persists the reset so the next read is cheap.
+ */
+async function consumeDailyState(userId: any) {
+  const me = await User.findById(userId).select(
+    'dailyLikesUsed dailyLikesResetAt'
+  );
+  if (!me) throw new Error('User not found');
+
+  const now = new Date();
+  if (!me.dailyLikesResetAt || me.dailyLikesResetAt <= now) {
+    me.dailyLikesUsed    = 0;
+    me.dailyLikesResetAt = nextMidnight(now);
+    await me.save({ validateBeforeSave: false });
+  }
+  return me;
+}
+
+// ─── Auto-unmatch sweep (lazy, runs on getMatches) ────────────────────────────
+
+/**
+ * Marks matches inactive when their autoUnmatchAt has passed without any
+ * activity. Pure side-effect; safe to call repeatedly.
+ *
+ * Why lazy instead of cron: keeps Phase-1 dependency-free. Once a real
+ * scheduler is in place, this can move to a periodic job.
+ */
+async function sweepAutoUnmatched(myId: any) {
+  const now = new Date();
+  const stale = await Match.find({
+    users: myId,
+    isActive: true,
+    autoUnmatchAt: { $ne: null, $lte: now },
+  }).select('users lastSenderId');
+
+  if (stale.length === 0) return;
+
+  await Match.updateMany(
+    { _id: { $in: stale.map((m) => m._id) } },
+    { $set: { isActive: false, closedReason: 'auto_unmatched' } }
+  );
+
+  // Penalize the ghoster — the user who sent the last message is the one
+  // *waiting*, so the OTHER user ghosted. If no message was ever sent, both
+  // parties share the blame (no penalty either way — handled by skipping).
+  for (const m of stale) {
+    if (!m.lastSenderId) continue;
+    const ghosterId = m.users.find(
+      (u) => u.toString() !== m.lastSenderId!.toString()
+    );
+    if (!ghosterId) continue;
+    await User.updateOne(
+      { _id: ghosterId },
+      { $inc: { engagementScore: ENGAGE_GHOSTED } }
+    );
+    // Clamp 0–100 in a follow-up update (Mongo $inc can't clamp)
+    await User.updateOne(
+      { _id: ghosterId, engagementScore: { $lt: 0 } },
+      { $set: { engagementScore: 0 } }
+    );
+  }
+}
 
 // ─── Like a User ──────────────────────────────────────────────────────────────
 
@@ -15,6 +87,22 @@ export async function likeUser(req: AuthRequest, res: Response, next: NextFuncti
 
     if (myId.toString() === toId) {
       return res.status(400).json({ success: false, message: 'Cannot like yourself' });
+    }
+
+    // Daily limit only applies to positive actions, not 'passed'
+    if (status === 'liked' || status === 'crushed') {
+      const me = await consumeDailyState(myId);
+      if (me.dailyLikesUsed >= DAILY_LIKE_LIMIT) {
+        return res.status(429).json({
+          success:  false,
+          code:     'DAILY_LIMIT_REACHED',
+          message:  `You've used all ${DAILY_LIKE_LIMIT} daily picks. Come back tomorrow!`,
+          resetAt:  me.dailyLikesResetAt,
+        });
+      }
+      // Increment FIRST so concurrent calls can't overshoot
+      me.dailyLikesUsed += 1;
+      await me.save({ validateBeforeSave: false });
     }
 
     // Upsert the like record
@@ -50,15 +138,51 @@ export async function likeUser(req: AuthRequest, res: Response, next: NextFuncti
 
     if (reverseLike) {
       const pair = [myId, toId].sort();
+      const now  = new Date();
       match = await Match.findOneAndUpdate(
         { users: pair },
-        { $setOnInsert: { users: pair, matchedAt: new Date() } },
+        {
+          $setOnInsert: {
+            users:         pair,
+            matchedAt:     now,
+            autoUnmatchAt: new Date(now.getTime() + AUTO_UNMATCH_MS),
+          },
+        },
         { upsert: true, new: true }
       );
       isMatch = true;
     }
 
-    res.json({ success: true, isMatch, matchId: match?._id });
+    // Surface the updated daily state so the client can refresh its counter
+    const meAfter = await User.findById(myId).select('dailyLikesUsed dailyLikesResetAt');
+    res.json({
+      success: true,
+      isMatch,
+      matchId: match?._id,
+      daily: {
+        used:      meAfter?.dailyLikesUsed ?? 0,
+        limit:     DAILY_LIKE_LIMIT,
+        remaining: Math.max(0, DAILY_LIKE_LIMIT - (meAfter?.dailyLikesUsed ?? 0)),
+        resetAt:   meAfter?.dailyLikesResetAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ─── Daily-Status Endpoint ────────────────────────────────────────────────────
+
+export async function getDailyStatus(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const me = await consumeDailyState(req.user!._id);
+    res.json({
+      success:   true,
+      used:      me.dailyLikesUsed,
+      limit:     DAILY_LIKE_LIMIT,
+      remaining: Math.max(0, DAILY_LIKE_LIMIT - me.dailyLikesUsed),
+      resetAt:   me.dailyLikesResetAt,
+    });
   } catch (err) {
     next(err);
   }
@@ -70,12 +194,15 @@ export async function getMatches(req: AuthRequest, res: Response, next: NextFunc
   try {
     const myId = req.user!._id;
 
+    // Lazily close stale matches before reading
+    await sweepAutoUnmatched(myId);
+
     const matches = await Match.find({ users: myId, isActive: true })
       .sort({ lastMessageAt: -1 })
       .populate({
         path:   'users',
         match:  { _id: { $ne: myId } },
-        select: 'displayName photoURL photos bio age occupation lastSeen',
+        select: 'displayName photoURL photos bio age occupation lastSeen intent engagementScore',
       });
 
     res.json({ success: true, data: matches });
@@ -98,7 +225,7 @@ export async function getLikesReceived(req: AuthRequest, res: Response, next: Ne
       to:     myId,
       from:   { $nin: interactedIds },
       status: { $in: ['liked', 'crushed'] },
-    }).populate('from', 'displayName photoURL photos bio age occupation');
+    }).populate('from', 'displayName photoURL photos bio age occupation intent');
 
     res.json({ success: true, data: likes });
   } catch (err) {
@@ -116,7 +243,8 @@ export async function unmatch(req: AuthRequest, res: Response, next: NextFunctio
     const match = await Match.findOne({ _id: matchId, users: myId });
     if (!match) return res.status(404).json({ success: false, message: 'Match not found' });
 
-    match.isActive = false;
+    match.isActive    = false;
+    match.closedReason = 'unmatched';
     await match.save();
 
     res.json({ success: true, message: 'Unmatched' });

@@ -50,6 +50,31 @@ const LOOKING_FOR_OPTIONS = [
 
 type LookingForId = 'friendship' | 'casual' | 'serious';
 
+const INTENT_OPTIONS = [
+  { id: 'serious'    as const, label: 'Serious', icon: '💍' },
+  { id: 'casual'     as const, label: 'Casual',  icon: '🍷' },
+  { id: 'friends'    as const, label: 'Friends', icon: '🤝' },
+  { id: 'networking' as const, label: 'Network', icon: '💼' },
+];
+
+type IntentId = 'serious' | 'casual' | 'friends' | 'networking';
+
+// Phase 3 — micro-communities (mirrors backend enum)
+const COMMUNITY_OPTIONS = [
+  { id: 'tech'       as const, label: 'Tech',            icon: '💻' },
+  { id: 'fitness'    as const, label: 'Fitness',         icon: '🏋️' },
+  { id: 'startup'    as const, label: 'Startup founders', icon: '🚀' },
+  { id: 'travel'     as const, label: 'Travelers',       icon: '✈️' },
+  { id: 'foodies'    as const, label: 'Foodies',         icon: '🍜' },
+  { id: 'creators'   as const, label: 'Creators',        icon: '🎬' },
+  { id: 'gamers'     as const, label: 'Gamers',          icon: '🎮' },
+  { id: 'bookworms'  as const, label: 'Bookworms',       icon: '📚' },
+  { id: 'musicians'  as const, label: 'Musicians',       icon: '🎸' },
+  { id: 'artists'    as const, label: 'Artists',         icon: '🎨' },
+];
+
+type CommunityId = typeof COMMUNITY_OPTIONS[number]['id'];
+
 const HOBBY_SUGGESTIONS = [
   'Music', 'Travel', 'Fitness', 'Movies', 'Reading', 'Cooking',
   'Photography', 'Gaming', 'Hiking', 'Dancing', 'Yoga', 'Art',
@@ -79,6 +104,8 @@ export default function PreferencesModal({ visible, onClose }: Props) {
   const [lookingFor,    setLookingFor]    = useState<LookingForId[]>([]);
   const [hobbies,       setHobbies]       = useState<string[]>([]);
   const [interestedIn,  setInterestedIn]  = useState<string[]>([]);
+  const [intent,        setIntent]        = useState<IntentId | null>(null);
+  const [communities,   setCommunities]   = useState<CommunityId[]>([]);
   const [maxDistance,   setMaxDistance]   = useState('');
   const [ageMin,        setAgeMin]        = useState('');
   const [ageMax,        setAgeMax]        = useState('');
@@ -91,6 +118,8 @@ export default function PreferencesModal({ visible, onClose }: Props) {
       setLookingFor((profile.lookingFor ?? []) as LookingForId[]);
       setHobbies(profile.hobbies ?? []);
       setInterestedIn(profile.interestedIn ?? ['male', 'female', 'non-binary', 'other']);
+      setIntent((profile.intent ?? null) as IntentId | null);
+      setCommunities((profile.communities ?? []) as CommunityId[]);
       setMaxDistance(String(profile.settings?.maxDistance ?? 10));
       setAgeMin(String(profile.settings?.ageRangeMin ?? 18));
       setAgeMax(String(profile.settings?.ageRangeMax ?? 45));
@@ -138,6 +167,8 @@ export default function PreferencesModal({ visible, onClose }: Props) {
         lookingFor,
         hobbies,
         interestedIn,
+        intent,
+        communities,
         settings: {
           ...(profile?.settings ?? {}),
           maxDistance: Math.max(1, Number(maxDistance) || 10),
@@ -197,8 +228,58 @@ export default function PreferencesModal({ visible, onClose }: Props) {
             keyboardShouldPersistTaps="handled"
           >
 
+            {/* ── Section: Primary Intent (single-choice) ── */}
+            <Text style={st.sectionLabel}>PRIMARY INTENT</Text>
+            <Text style={st.sectionHint}>Used to surface people looking for the same thing</Text>
+
+            <View style={st.genderRow}>
+              {INTENT_OPTIONS.map((opt) => {
+                const active = intent === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={[st.genderChip, active && st.genderChipActive]}
+                    onPress={() => setIntent(active ? null : opt.id)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[st.genderChipText, active && st.genderChipTextActive]}>
+                      {opt.icon} {opt.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {/* ── Section: Communities ── */}
+            <Text style={[st.sectionLabel, { marginTop: 28 }]}>COMMUNITIES</Text>
+            <Text style={st.sectionHint}>People sharing your communities rank higher in your feed</Text>
+
+            <View style={st.chipRow}>
+              {COMMUNITY_OPTIONS.map((opt) => {
+                const active = communities.includes(opt.id);
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={active ? st.chipOn : st.chipOff}
+                    onPress={() =>
+                      setCommunities((prev) =>
+                        prev.includes(opt.id)
+                          ? prev.filter((x) => x !== opt.id)
+                          : [...prev, opt.id]
+                      )
+                    }
+                    activeOpacity={0.8}
+                  >
+                    <Text style={active ? st.chipOnTxt : st.chipOffTxt}>
+                      {opt.icon} {opt.label}{active ? '  ✕' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             {/* ── Section: Looking For ── */}
-            <Text style={st.sectionLabel}>LOOKING FOR</Text>
+            <Text style={[st.sectionLabel, { marginTop: 28 }]}>LOOKING FOR</Text>
             <Text style={st.sectionHint}>Select all that apply</Text>
 
             {LOOKING_FOR_OPTIONS.map((opt) => {

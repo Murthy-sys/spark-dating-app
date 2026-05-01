@@ -1,5 +1,49 @@
 // ─── User Types ──────────────────────────────────────────────────────────────
 
+/**
+ * Primary intent — single-choice, drives intent-first matching.
+ * Distinct from `lookingFor` (multi-select labels for display).
+ */
+export type Intent = 'serious' | 'casual' | 'friends' | 'networking';
+
+// Phase 3 — micro-communities. Predefined, mirrored on the backend enum.
+export type Community =
+  | 'tech'
+  | 'fitness'
+  | 'startup'
+  | 'travel'
+  | 'foodies'
+  | 'creators'
+  | 'gamers'
+  | 'bookworms'
+  | 'musicians'
+  | 'artists';
+
+// ─── Phase 2: Safety types ───────────────────────────────────────────────────
+
+export interface SosContact {
+  name:  string;
+  phone: string;
+}
+
+export type VerificationStatus = 'unverified' | 'pending' | 'verified' | 'rejected';
+
+export interface VerificationState {
+  status:       VerificationStatus;
+  mediaURL?:    string;
+  submittedAt?: string;
+  reviewedAt?:  string;
+  reviewNote?:  string;
+}
+
+export type Visibility = 'everyone' | 'verified_only' | 'matches_only';
+
+export interface PrivacySettings {
+  visibility:           Visibility;
+  hidePhotosUntilMatch: boolean;
+  hideFromSearch:       boolean;
+}
+
 export interface UserProfile {
   _id: string;        // MongoDB ObjectId as string — single source of truth
   displayName: string;
@@ -13,6 +57,15 @@ export interface UserProfile {
   occupation: string;
   hobbies?: string[];                                       // added in onboarding step 3
   lookingFor?: ('friendship' | 'casual' | 'serious')[];    // added in onboarding step 4
+  intent?: Intent | null;                                   // primary intent (single)
+  communities?: Community[];                                // Phase 3: micro-communities
+  engagementScore?: number;                                 // 0–100 anti-ghost score
+  // Phase 2 — safety
+  sosContacts?: SosContact[];
+  verification?: VerificationState;
+  trustScore?: number;
+  privacy?: PrivacySettings;
+  photosHidden?: boolean;                                   // server-set when hidePhotosUntilMatch is on
   location: GeoPoint | null;
   lastSeen: string;   // ISO date string as returned by JSON serialization
   createdAt: string;
@@ -54,6 +107,13 @@ export interface Crossing {
   location: GeoPoint;
 }
 
+export interface DailyStatus {
+  used:      number;
+  limit:     number;
+  remaining: number;
+  resetAt:   string;   // ISO date
+}
+
 export type LikeStatus = 'liked' | 'crushed' | 'passed';
 
 export interface Like {
@@ -70,6 +130,9 @@ export interface Match {
   matchedAt: string;
   lastMessage?: string;
   lastMessageAt?: string | null;
+  lastSenderId?: string | null;       // who sent the latest message
+  replyDueAt?: string | null;          // ISO — anti-ghost reply deadline
+  autoUnmatchAt?: string | null;       // ISO — when match closes if unanswered
   unreadCount: Record<string, number>;
   isActive: boolean;
 }

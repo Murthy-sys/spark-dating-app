@@ -125,7 +125,14 @@ export const apiClient = axios.create({
 });
 
 // ─── Retry helper ─────────────────────────────────────────────────────────────
+
+// Multipart upload paths — we never retry these. A failed 10 MB upload would
+// re-send the whole file 3× on cellular, which is cruel and slow.
+const NO_RETRY_PATHS = ['/safety/verification', '/photos', '/image'];
+
 function isRetryable(error: AxiosError): boolean {
+  const url = error.config?.url ?? '';
+  if (NO_RETRY_PATHS.some((p) => url.includes(p))) return false;
   if (!error.response) return true; // network error / timeout
   const status = error.response.status;
   // 408 = Request Timeout (localtunnel or proxy timed out) — safe to retry

@@ -28,6 +28,8 @@ import {
 } from 'react-native';
 import { UserProfile } from '../types';
 import { blockUser } from '../services/userService';
+import UserAvatar from './UserAvatar';
+import { resolvePhotoUrl } from '../utils/photoUrl';
 
 const { width, height } = Dimensions.get('window');
 
@@ -53,6 +55,20 @@ const LOOKING_FOR_LABELS: Record<string, string> = {
   friendship: 'Friendship',
   casual:     'Casual dating',
   serious:    'Long-term relationship',
+};
+
+// Phase 3 — community label + emoji (mirrors PreferencesModal & backend enum)
+const COMMUNITY_META: Record<string, { label: string; icon: string }> = {
+  tech:      { label: 'Tech',             icon: '💻' },
+  fitness:   { label: 'Fitness',          icon: '🏋️' },
+  startup:   { label: 'Startup founders', icon: '🚀' },
+  travel:    { label: 'Travelers',        icon: '✈️' },
+  foodies:   { label: 'Foodies',          icon: '🍜' },
+  creators:  { label: 'Creators',         icon: '🎬' },
+  gamers:    { label: 'Gamers',           icon: '🎮' },
+  bookworms: { label: 'Bookworms',        icon: '📚' },
+  musicians: { label: 'Musicians',        icon: '🎸' },
+  artists:   { label: 'Artists',          icon: '🎨' },
 };
 
 // ─── action button ────────────────────────────────────────────────────────────
@@ -120,7 +136,6 @@ export default function UserDetailModal({
     user.photos?.length ? user.photos : user.photoURL ? [user.photoURL] : []
   ).filter(Boolean);
 
-  const mainPhoto     = photos[0] ?? null;
   const extraPhotos   = photos.slice(1);
   const activeLabel   = user.lastSeen ? timeSince(user.lastSeen) : 'Recently active';
   const lookingForLabels = (user as any).lookingFor
@@ -195,9 +210,19 @@ export default function UserDetailModal({
 
         {/* ── name + active ── */}
         <View style={styles.nameRow}>
-          <Text style={styles.nameText}>
-            {user.displayName}, {user.age}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={styles.nameText}>
+              {user.displayName}, {user.age}
+            </Text>
+            {(user as any).verification?.status === 'verified' && (
+              <Text style={styles.verifiedTick}>✓</Text>
+            )}
+            {typeof (user as any).trustScore === 'number' && (user as any).trustScore > 0 && (
+              <View style={styles.trustChip}>
+                <Text style={styles.trustChipText}>Trust {(user as any).trustScore}</Text>
+              </View>
+            )}
+          </View>
           <View style={styles.activeRow}>
             <View style={styles.activeDot} />
             <Text style={styles.activeText}>{activeLabel}</Text>
@@ -210,16 +235,10 @@ export default function UserDetailModal({
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          {/* main photo */}
-          {mainPhoto ? (
-            <View style={styles.photoCard}>
-              <Image source={{ uri: mainPhoto }} style={styles.photo} />
-            </View>
-          ) : (
-            <View style={[styles.photoCard, styles.noPhotoCard]}>
-              <Text style={styles.noPhotoText}>No photo yet</Text>
-            </View>
-          )}
+          {/* main photo — falls back to gender-themed avatar when missing/broken */}
+          <View style={styles.photoCard}>
+            <UserAvatar user={user} style={styles.photo} avatarSize={800} />
+          </View>
 
           {/* looking for */}
           {lookingForLabels.length > 0 && (
@@ -261,6 +280,20 @@ export default function UserDetailModal({
             </View>
           )}
 
+          {/* communities (Phase 3) */}
+          {(user as any).communities?.length > 0 && (
+            <View style={styles.section}>
+              <SectionHead label="Communities" />
+              <View style={styles.chipRow}>
+                {(user as any).communities.map((c: string) => {
+                  const meta = COMMUNITY_META[c];
+                  if (!meta) return null;
+                  return <Chip key={c} label={`${meta.icon} ${meta.label}`} filled />;
+                })}
+              </View>
+            </View>
+          )}
+
           {/* crossing badge */}
           {crossing && (
             <View style={styles.crossingBadge}>
@@ -272,13 +305,22 @@ export default function UserDetailModal({
             </View>
           )}
 
-          {/* extra photos — one per card */}
+          {/* extra photos — one per card. resolvePhotoUrl repairs stale LAN hosts. */}
           {extraPhotos.length > 0 && (
             <View style={styles.section}>
               <SectionHead label="More photos" />
               {extraPhotos.map((uri, i) => (
                 <View key={i} style={[styles.photoCard, { marginBottom: 14 }]}>
-                  <Image source={{ uri }} style={styles.photo} />
+                  <Image
+                    source={{ uri: resolvePhotoUrl(uri) }}
+                    style={styles.photo}
+                    onError={(e) =>
+                      console.warn('[UserDetailModal] extra photo failed', {
+                        uri: resolvePhotoUrl(uri),
+                        error: e.nativeEvent?.error,
+                      })
+                    }
+                  />
                 </View>
               ))}
             </View>
@@ -363,6 +405,16 @@ const styles = StyleSheet.create({
   activeRow:  { flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 },
   activeDot:  { width: 10, height: 10, borderRadius: 5, backgroundColor: '#22C55E' },
   activeText: { fontSize: 14, color: '#22C55E', fontWeight: '600' },
+
+  // Verified tick + trust chip (Phase 2)
+  verifiedTick: {
+    fontSize: 18, fontWeight: '900', color: '#fff', backgroundColor: '#22C55E',
+    paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, overflow: 'hidden',
+  },
+  trustChip: {
+    backgroundColor: '#EAF7EE', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 3,
+  },
+  trustChipText: { fontSize: 11, fontWeight: '700', color: '#15803D' },
 
   /* scroll */
   scroll:        { flex: 1 },

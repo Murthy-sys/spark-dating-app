@@ -18,6 +18,7 @@ import userRoutes     from './routes/users';
 import crossingRoutes from './routes/crossings';
 import matchRoutes    from './routes/matches';
 import messageRoutes  from './routes/messages';
+import safetyRoutes   from './routes/safety';
 
 const app    = express();
 const server = http.createServer(app);
@@ -53,11 +54,21 @@ const authLimiter = rateLimit({
 });
 
 // ─── Request Timeout ──────────────────────────────────────────────────────────
-// If any request takes longer than 25 s, send a 408 instead of hanging forever.
-// (Tunnels like localtunnel have ~30 s upstream timeout — responding before that
-// prevents localtunnel itself from generating its own 408 upstream.)
+// 25s default (tunnels like localtunnel have ~30s upstream timeout — responding
+// before that prevents localtunnel itself from generating its own 408 upstream).
+//
+// Multipart uploads (verification video, profile photos, chat images) get 90s
+// because a 5–15 MB video over cellular regularly exceeds 25s.
+const UPLOAD_PATHS = [
+  /^\/api\/safety\/verification(\/|$)/,
+  /^\/api\/users\/me\/photos(\/|$)/,
+  /^\/api\/messages\/[^/]+\/image(\/|$)/,
+];
+const isUploadPath = (p: string) => UPLOAD_PATHS.some((re) => re.test(p));
+
 app.use((req, res, next) => {
-  res.setTimeout(25_000, () => {
+  const ms = isUploadPath(req.path) ? 90_000 : 25_000;
+  res.setTimeout(ms, () => {
     if (!res.headersSent) {
       res.status(408).json({ success: false, message: 'Request timed out. Please try again.' });
     }
@@ -88,6 +99,7 @@ app.use('/api/users',     userRoutes);
 app.use('/api/crossings', crossingRoutes);
 app.use('/api/matches',   matchRoutes);
 app.use('/api/messages',  messageRoutes);
+app.use('/api/safety',    safetyRoutes);
 
 // ─── Error Handling ───────────────────────────────────────────────────────────
 app.use(notFound);

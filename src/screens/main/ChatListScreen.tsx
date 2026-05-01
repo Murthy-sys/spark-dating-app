@@ -14,7 +14,6 @@ import {
   View,
   Text,
   FlatList,
-  Image,
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
@@ -26,6 +25,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../store/authStore';
 import { getMatches } from '../../services/matchingService';
 import { Match, UserProfile, ChatStackParamList } from '../../types';
+import UserAvatar from '../../components/UserAvatar';
 
 type Nav = NativeStackNavigationProp<ChatStackParamList, 'MatchList'>;
 
@@ -62,6 +62,19 @@ export default function ChatListScreen() {
     if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
     if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
     return d.toLocaleDateString();
+  };
+
+  /**
+   * Returns a "reply due" label when the *current* user owes a reply.
+   * The user owes a reply when lastSenderId is the OTHER user.
+   */
+  const replyDueLabel = (match: Match): string | null => {
+    if (!profile || !match.lastSenderId || !match.replyDueAt) return null;
+    if (match.lastSenderId === profile._id) return null; // I sent last
+    const ms = new Date(match.replyDueAt).getTime() - Date.now();
+    if (ms <= 0) return 'Reply overdue';
+    const h = Math.ceil(ms / 3_600_000);
+    return h <= 1 ? 'Reply due in <1h' : `Reply due in ${h}h`;
   };
 
   if (loading) {
@@ -110,12 +123,10 @@ export default function ChatListScreen() {
                 }
               >
                 <View style={styles.avatarContainer}>
-                  <Image
-                    source={{
-                      uri: otherUser.photoURL ||
-                           'https://placehold.co/112x112/eee/ccc?text=?',
-                    }}
+                  <UserAvatar
+                    user={otherUser}
                     style={styles.avatar}
+                    avatarSize={120}
                   />
                   {unread > 0 && (
                     <View style={styles.badge}>
@@ -126,7 +137,12 @@ export default function ChatListScreen() {
 
                 <View style={styles.info}>
                   <View style={styles.infoTop}>
-                    <Text style={styles.name} numberOfLines={1}>{otherUser.displayName}</Text>
+                    <View style={styles.nameRow}>
+                      <Text style={styles.name} numberOfLines={1}>{otherUser.displayName}</Text>
+                      {otherUser.verification?.status === 'verified' && (
+                        <Text style={styles.verifiedTick}>✓</Text>
+                      )}
+                    </View>
                     <Text style={styles.time}>{formatTime(match.lastMessageAt)}</Text>
                   </View>
                   {otherUser.occupation ? (
@@ -135,6 +151,23 @@ export default function ChatListScreen() {
                   <Text style={[styles.preview, unread > 0 && styles.previewUnread]} numberOfLines={1}>
                     {match.lastMessage || 'Say hello! 👋'}
                   </Text>
+                  {replyDueLabel(match) && (
+                    <View
+                      style={[
+                        styles.replyDuePill,
+                        replyDueLabel(match) === 'Reply overdue' && styles.replyDuePillOverdue,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.replyDueText,
+                          replyDueLabel(match) === 'Reply overdue' && styles.replyDueTextOverdue,
+                        ]}
+                      >
+                        ⏱ {replyDueLabel(match)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               </TouchableOpacity>
             );
@@ -187,11 +220,29 @@ const styles = StyleSheet.create({
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   info:       { flex: 1, marginLeft: 14 },
   infoTop:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  name:       { fontSize: 16, fontWeight: '700', color: '#1a1a1a', flex: 1, marginRight: 8 },
+  nameRow:    { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 8, gap: 6 },
+  name:       { fontSize: 16, fontWeight: '700', color: '#1a1a1a', flexShrink: 1 },
+  verifiedTick: {
+    fontSize: 11, fontWeight: '900', color: '#fff', backgroundColor: '#22C55E',
+    paddingHorizontal: 5, paddingVertical: 1, borderRadius: 8, overflow: 'hidden',
+  },
   time:       { fontSize: 11, color: '#bbb' },
   occupation: { fontSize: 12, color: '#aaa', marginTop: 1 },
   preview:    { fontSize: 13, color: '#999', marginTop: 3 },
   previewUnread: { color: '#1a1a1a', fontWeight: '600' },
+
+  // Anti-ghosting reply-timer pill
+  replyDuePill: {
+    alignSelf:         'flex-start',
+    marginTop:         6,
+    paddingHorizontal: 8,
+    paddingVertical:   3,
+    borderRadius:      10,
+    backgroundColor:   '#FFF4E5',
+  },
+  replyDuePillOverdue: { backgroundColor: '#FFE4E4' },
+  replyDueText:        { fontSize: 11, fontWeight: '700', color: '#B25E00' },
+  replyDueTextOverdue: { color: '#C0223A' },
   empty: {
     flex: 1,
     alignItems: 'center',

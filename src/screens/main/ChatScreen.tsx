@@ -27,6 +27,7 @@ import {
   emitStopTyping,
   getSocket,
 } from '../../services/chatService';
+import UserAvatar from '../../components/UserAvatar';
 
 type Props = NativeStackScreenProps<ChatStackParamList, 'Chat'>;
 
@@ -153,12 +154,7 @@ export default function ChatScreen({ route }: Props) {
     const isMe = item.sender === profile?._id;
     return (
       <View style={[styles.messageRow, isMe ? styles.messageRowMe : styles.messageRowThem]}>
-        {!isMe && (
-          <Image
-            source={{ uri: otherUser.photoURL || 'https://placehold.co/60x60/eee/ccc?text=?' }}
-            style={styles.msgAvatar}
-          />
-        )}
+        {!isMe && <UserAvatar user={otherUser} style={styles.msgAvatar} avatarSize={80} />}
         <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
           {item.imageURL ? (
             <Image source={{ uri: item.imageURL }} style={styles.messageImage} />
@@ -171,11 +167,8 @@ export default function ChatScreen({ route }: Props) {
             {formatTime(item.createdAt)}
           </Text>
         </View>
-        {isMe && (
-          <Image
-            source={{ uri: profile?.photoURL || 'https://placehold.co/60x60/eee/ccc?text=?' }}
-            style={styles.msgAvatar}
-          />
+        {isMe && profile && (
+          <UserAvatar user={profile} style={styles.msgAvatar} avatarSize={80} />
         )}
       </View>
     );

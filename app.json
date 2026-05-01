@@ -18,7 +18,13 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Spark uses your location to show you people you've crossed paths with.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Spark uses your location in the background to detect crossings.",
-        "NSPhotoLibraryUsageDescription": "Spark needs access to your photos to set your profile picture."
+        "NSPhotoLibraryUsageDescription": "Spark needs access to your photos to set your profile picture.",
+        "NSCameraUsageDescription": "Spark uses your camera to record your verification selfie video.",
+        "NSMicrophoneUsageDescription": "Spark uses your microphone while recording your verification video.",
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        }
       }
     },
     "android": {
@@ -27,10 +33,13 @@
         "backgroundColor": "#0F0A19"
       },
       "package": "com.yourcompany.sparkapp",
+      "usesCleartextTraffic": true,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
-        "READ_EXTERNAL_STORAGE"
+        "READ_EXTERNAL_STORAGE",
+        "CAMERA",
+        "RECORD_AUDIO"
       ]
     },
     "plugins": [

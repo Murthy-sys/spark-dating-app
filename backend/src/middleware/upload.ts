@@ -44,6 +44,38 @@ export const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
 });
 
+// Accepts image OR short video — kept available for non-verification flows.
+const mediaFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  if (file.mimetype.startsWith('image/') || file.mimetype.startsWith('video/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image or video files are allowed'));
+  }
+};
+
+export const uploadMedia = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: mediaFilter,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB — allow short verification videos
+});
+
+// Video-only — used for identity verification (Happn-style selfie video).
+// Reject anything that isn't a video so the verification badge can't be earned
+// with a still photo.
+const videoFilter = (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  if (file.mimetype.startsWith('video/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Verification requires a short selfie video'));
+  }
+};
+
+export const uploadVideo = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: videoFilter,
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB
+});
+
 // ─── Main upload function ─────────────────────────────────────────────────────
 // baseUrl: pass req.protocol + '://' + req.get('host') from the controller
 // so that local URLs use the real network IP, not localhost
@@ -116,6 +148,32 @@ async function _saveToLocalDisk(
 
   const url = `${resolvedBase}/uploads/${safeFilename}`;
   return { url, publicId: safeFilename };
+}
+
+// ─── Verification media (image OR video) — local disk, preserves extension ──
+//
+// Kept separate from uploadImage so we don't run video through the
+// image-only Cloudinary transformation pipeline. For Phase 2 we store
+// verification media on local disk regardless of Cloudinary config — the
+// review surface will be in-app, not the public CDN.
+export async function saveVerificationMedia(
+  buffer: Buffer,
+  originalName: string,
+  publicId: string,
+  baseUrl?: string,
+): Promise<{ url: string; publicId: string }> {
+  const ext = (path.extname(originalName) || '.bin').toLowerCase();
+  const safeFilename = publicId.replace(/[^a-zA-Z0-9_-]/g, '_') + ext;
+  const filePath = path.join(LOCAL_UPLOADS_DIR, safeFilename);
+
+  fs.writeFileSync(filePath, buffer);
+
+  const resolvedBase =
+    baseUrl ||
+    process.env.SERVER_BASE_URL ||
+    `http://0.0.0.0:${process.env.PORT || 5001}`;
+
+  return { url: `${resolvedBase}/uploads/${safeFilename}`, publicId: safeFilename };
 }
 
 // ─── Delete image ─────────────────────────────────────────────────────────────

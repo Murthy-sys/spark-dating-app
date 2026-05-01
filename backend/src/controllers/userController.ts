@@ -21,7 +21,7 @@ export async function getProfile(req: AuthRequest, res: Response, next: NextFunc
 
 export async function updateProfile(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const allowed = ['displayName', 'bio', 'occupation', 'interestedIn', 'settings', 'age', 'gender', 'hobbies', 'lookingFor'];
+    const allowed = ['displayName', 'bio', 'occupation', 'interestedIn', 'settings', 'age', 'gender', 'hobbies', 'lookingFor', 'intent', 'communities'];
     const updates: Record<string, any> = {};
 
     for (const key of allowed) {
@@ -189,17 +189,66 @@ export async function getNearbyUsers(req: AuthRequest, res: Response, next: Next
     const ageMin = me.settings?.ageRangeMin ?? 18;
     const ageMax = me.settings?.ageRangeMax ?? 99;
 
+    // Visibility filter:
+    //   - hideFromSearch     → never appears in nearby
+    //   - matches_only       → only visible after a match (so never in nearby)
+    //   - verified_only      → only visible to viewers who are themselves verified
+    const viewerVerified = me.verification?.status === 'verified';
+    const visibilityFilter: any = {
+      'privacy.hideFromSearch': { $ne: true },
+      'privacy.visibility':     { $ne: 'matches_only' },
+    };
+    if (!viewerVerified) {
+      visibilityFilter['privacy.visibility'] = { $nin: ['matches_only', 'verified_only'] };
+    }
+
     const nearbyUsers = await User.find({
       _id:               { $ne: me._id, $nin: me.blockedUsers ?? [] },
       isActive:           true,
       'settings.showMe':  true,
       age:               { $gte: ageMin, $lte: ageMax },
       ...genderFilter,
+      ...visibilityFilter,
     })
       .limit(limit)
-      .select('displayName photoURL photos bio age gender occupation hobbies lookingFor lastSeen location');
+      .select('displayName photoURL photos bio age gender occupation hobbies lookingFor intent communities engagementScore verification trustScore privacy lastSeen location');
 
-    res.json({ success: true, data: nearbyUsers, count: nearbyUsers.length });
+    // Ranking: same-intent first, then by # of shared communities (more = higher).
+    // Users with no intent sink to the bottom — they haven't told us what they want.
+    const myCommunities = new Set(me.communities ?? []);
+    const sharedCount = (other: any) =>
+      (other.communities ?? []).reduce(
+        (n: number, c: string) => n + (myCommunities.has(c) ? 1 : 0),
+        0,
+      );
+
+    const sorted = (me.intent || myCommunities.size > 0)
+      ? [...nearbyUsers].sort((a, b) => {
+          // Same-intent bucket: 0 = exact match, 1 = has some intent, 2 = no intent
+          const aIntent = a.intent === me.intent ? 0 : a.intent ? 1 : 2;
+          const bIntent = b.intent === me.intent ? 0 : b.intent ? 1 : 2;
+          if (aIntent !== bIntent) return aIntent - bIntent;
+          // Tiebreak: more shared communities ranks higher
+          return sharedCount(b) - sharedCount(a);
+        })
+      : nearbyUsers;
+
+    // Strip photos for users who chose `hidePhotosUntilMatch`. We reveal the
+    // photos only after a match exists — that handshake happens in matches
+    // endpoints. Until then, return empty arrays + a flag so the client can
+    // render a placeholder card.
+    const cleaned = sorted.map((u) => {
+      if (u.privacy?.hidePhotosUntilMatch) {
+        const obj: any = u.toObject();
+        obj.photos       = [];
+        obj.photoURL     = '';
+        obj.photosHidden = true;
+        return obj;
+      }
+      return u;
+    });
+
+    res.json({ success: true, data: cleaned, count: cleaned.length });
   } catch (err) {
     next(err);
   }

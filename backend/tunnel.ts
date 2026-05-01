@@ -81,14 +81,42 @@ async function startTunnel() {
   console.log('═══════════════════════════════════════════════════════');
   console.log('');
 
-  tunnel.on('close', () => {
-    console.log('⚡  Tunnel closed — reopening...');
-    startTunnel();
-  });
+  // Defensive reconnect — guard against double-restart.
+  // localtunnel can fire 'error' AND 'close' for the same drop, and there are
+  // also silent-zombie cases (Wi-Fi change, laptop sleep) where the local
+  // client thinks it's connected but loca.lt is returning 503. We restart on
+  // error too, and self-probe every 60s — if our own /health returns non-2xx
+  // through the tunnel we tear down and reopen.
+  let restarted = false;
+  const restartOnce = (reason: string) => {
+    if (restarted) return;
+    restarted = true;
+    console.log(`⚡  Tunnel ${reason} — reopening...`);
+    try { tunnel.close(); } catch {}
+    setTimeout(startTunnel, 1_000);
+  };
 
+  tunnel.on('close', () => restartOnce('closed'));
   tunnel.on('error', (err: Error) => {
     console.error('Tunnel error:', err.message);
+    restartOnce('errored');
   });
+
+  // Periodic health probe — catches silent zombies that don't fire 'error'/'close'
+  const probe = setInterval(async () => {
+    try {
+      const res = await fetch(`${tunnel.url}/health`, {
+        headers: { 'bypass-tunnel-reminder': 'true' },
+      });
+      if (!res.ok) {
+        clearInterval(probe);
+        restartOnce(`probe got ${res.status}`);
+      }
+    } catch (err: any) {
+      clearInterval(probe);
+      restartOnce(`probe failed: ${err.message}`);
+    }
+  }, 60_000);
 }
 
 startTunnel();

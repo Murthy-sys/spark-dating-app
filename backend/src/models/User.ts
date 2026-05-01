@@ -15,6 +15,28 @@ export interface IUser extends Document {
   occupation:   string;
   hobbies:      string[];
   lookingFor:   string[];
+  intent:       'serious' | 'casual' | 'friends' | 'networking' | null;
+  communities:  string[];         // Phase 3: micro-community membership
+  engagementScore:    number;     // 0–100; replies fast → up, ghosts → down
+  dailyLikesUsed:     number;
+  dailyLikesResetAt:  Date;
+
+  // ─── Phase 2: Women-first safety ────────────────────────────────────────
+  sosContacts: { name: string; phone: string }[];
+  verification: {
+    status:       'unverified' | 'pending' | 'verified' | 'rejected';
+    mediaURL?:    string;
+    submittedAt?: Date;
+    reviewedAt?:  Date;
+    reviewNote?:  string;
+  };
+  trustScore:  number;            // 0–100 derived score
+  privacy: {
+    visibility:           'everyone' | 'verified_only' | 'matches_only';
+    hidePhotosUntilMatch: boolean;
+    hideFromSearch:       boolean;
+  };
+
   location: {
     type:        string;
     coordinates: [number, number]; // [longitude, latitude] — GeoJSON order
@@ -89,6 +111,76 @@ const UserSchema = new Schema<IUser>(
       type:    [String],
       default: [],
       enum:    ['friendship', 'casual', 'serious'],
+    },
+
+    // Primary intent — single source of truth for intent-first matching.
+    // `lookingFor` (multi) is kept for backward compat / display.
+    intent: {
+      type:    String,
+      enum:    ['serious', 'casual', 'friends', 'networking', null],
+      default: null,
+    },
+
+    // Phase 3: micro-communities. Predefined list — server validates so a
+    // typo'd or made-up name can't pollute the dataset. Add to this enum
+    // when you want a new community to exist.
+    communities: {
+      type:    [String],
+      default: [],
+      enum:    [
+        'tech',
+        'fitness',
+        'startup',
+        'travel',
+        'foodies',
+        'creators',
+        'gamers',
+        'bookworms',
+        'musicians',
+        'artists',
+      ],
+    },
+
+    engagementScore:   { type: Number, default: 100, min: 0, max: 100 },
+    dailyLikesUsed:    { type: Number, default: 0 },
+    dailyLikesResetAt: { type: Date,   default: () => new Date() },
+
+    // ─── Phase 2: Safety ────────────────────────────────────────────────
+    sosContacts: {
+      type: [{
+        name:  { type: String, required: true, trim: true, maxlength: 60 },
+        phone: { type: String, required: true, trim: true, maxlength: 20 },
+        _id:   false,
+      }],
+      default:  [],
+      validate: {
+        validator: (v: any[]) => v.length <= 3,
+        message:   'You can save up to 3 SOS contacts',
+      },
+    },
+
+    verification: {
+      status: {
+        type:    String,
+        enum:    ['unverified', 'pending', 'verified', 'rejected'],
+        default: 'unverified',
+      },
+      mediaURL:    { type: String },
+      submittedAt: { type: Date },
+      reviewedAt:  { type: Date },
+      reviewNote:  { type: String },
+    },
+
+    trustScore: { type: Number, default: 0, min: 0, max: 100 },
+
+    privacy: {
+      visibility: {
+        type:    String,
+        enum:    ['everyone', 'verified_only', 'matches_only'],
+        default: 'everyone',
+      },
+      hidePhotosUntilMatch: { type: Boolean, default: false },
+      hideFromSearch:       { type: Boolean, default: false },
     },
 
     // GeoJSON Point for MongoDB geospatial queries

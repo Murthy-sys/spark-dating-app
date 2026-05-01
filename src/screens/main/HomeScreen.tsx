@@ -1,34 +1,58 @@
 /**
- * HomeScreen.tsx — "Crossed Paths" feed (Happn-style)
- *
- * Modern horizontal card slider where the focused card is enlarged.
- * Tap a card to see full details. Like, crush (star), or pass from cards.
+ * HomeScreen.tsx — Nearby / Crossed-Paths discovery via a rotatable
+ * pseudo-3D sphere of profile avatars (see ProfileSphere). Tap a face
+ * to open details; like / star / pass acts on the front-most profile.
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
-  Image,
   StyleSheet,
   SafeAreaView,
   ActivityIndicator,
-  Animated,
   Dimensions,
   TouchableOpacity,
   Alert,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
-import { getCrossedPathsUsers, getNearbyUsers, likeUser, passUser, starUser } from '../../services/matchingService';
+import {
+  getCrossedPathsUsers,
+  getNearbyUsers,
+  likeUser,
+  passUser,
+  starUser,
+  getDailyStatus,
+  DailyLimitError,
+} from '../../services/matchingService';
 import { useLocation } from '../../hooks/useLocation';
 import MatchModal from '../../components/MatchModal';
 import UserDetailModal from '../../components/UserDetailModal';
-import { UserProfile } from '../../types';
+import ProfileSphere from '../../components/ProfileSphere';
+import { DailyStatus, UserProfile } from '../../types';
+
+// ─── Intent labels (mirrors backend Intent type) ─────────────────────────────
+const INTENT_LABEL: Record<string, string> = {
+  serious:    'Serious',
+  casual:     'Casual',
+  friends:    'Friends',
+  networking: 'Networking',
+};
+
+function intentBadge(intent?: string | null): string | null {
+  return intent ? INTENT_LABEL[intent] ?? null : null;
+}
+
+function hoursUntil(iso?: string): string {
+  if (!iso) return 'soon';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'soon';
+  const h = Math.ceil(ms / 3_600_000);
+  return h <= 1 ? '1h' : `${h}h`;
+}
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = width * 0.72;
-const CARD_SPACING = 12;
-const SIDE_SPACING = (width - CARD_WIDTH) / 2;
+const SPHERE_SIZE = Math.min(width - 24, 380);
 
 type FeedItem  = { user: UserProfile; crossingCount: number; crossedAt: string };
 type MatchState = { user: UserProfile; matchId: string } | null;
@@ -42,8 +66,15 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [matchState, setMatchState] = useState<MatchState>(null);
   const [detailItem, setDetailItem] = useState<FeedItem | null>(null);
+  const [daily, setDaily]           = useState<DailyStatus | null>(null);
+  const [frontItem, setFrontItem]   = useState<FeedItem | null>(null);
 
-  const scrollX = useRef(new Animated.Value(0)).current;
+  // Initial fetch of daily-pick budget; refreshed on every successful like.
+  useEffect(() => {
+    getDailyStatus().then(setDaily).catch(() => {});
+  }, []);
+
+  const limitReached = daily ? daily.remaining <= 0 : false;
 
   const loadFeed = useCallback(async () => {
     if (!profile) return;
@@ -83,12 +114,29 @@ export default function HomeScreen() {
   };
 
   const handleLike = async (item: FeedItem, isCrush = false) => {
+    if (limitReached) {
+      Alert.alert(
+        'Daily picks used',
+        `You've used all ${daily?.limit ?? 10} picks for today. Come back in ${hoursUntil(daily?.resetAt)}.`,
+      );
+      return;
+    }
     try {
-      const { isMatch, matchId } = await likeUser(item.user._id, isCrush ? 'crushed' : 'liked');
+      const { isMatch, matchId, daily: d } = await likeUser(
+        item.user._id,
+        isCrush ? 'crushed' : 'liked',
+      );
+      if (d) setDaily(d);
       handleRemove(item.user._id);
       setDetailItem(null);
       if (isMatch && matchId) handleMatch(item.user, matchId);
-    } catch {
+    } catch (err) {
+      if (err instanceof DailyLimitError) {
+        // Refresh local state from server-truth so UI locks immediately
+        setDaily({ used: 10, limit: 10, remaining: 0, resetAt: err.resetAt });
+        Alert.alert('Daily picks used', err.message);
+        return;
+      }
       Alert.alert('Error', 'Could not send like. Please try again.');
     }
   };
@@ -100,6 +148,13 @@ export default function HomeScreen() {
   };
 
   const handleStar = async (item: FeedItem) => {
+    if (limitReached) {
+      Alert.alert(
+        'Daily picks used',
+        `Crushes count toward your daily limit. Come back in ${hoursUntil(daily?.resetAt)}.`,
+      );
+      return;
+    }
     try {
       await starUser(item.user._id);
       await handleLike(item, true);
@@ -153,6 +208,17 @@ export default function HomeScreen() {
         </View>
       ) : null}
 
+      {/* Daily picks banner — anchors the no-swipe model */}
+      {daily && (
+        <View style={[styles.dailyBanner, limitReached && styles.dailyBannerLocked]}>
+          <Text style={styles.dailyBannerText}>
+            {limitReached
+              ? `🔒 You've used all ${daily.limit} picks today — resets in ${hoursUntil(daily.resetAt)}`
+              : `${daily.remaining} of ${daily.limit} picks left today`}
+          </Text>
+        </View>
+      )}
+
       {feed.length === 0 && !loading ? (
         <View style={styles.empty}>
           <Text style={styles.emptyEmoji}>🚶</Text>
@@ -162,117 +228,64 @@ export default function HomeScreen() {
           </Text>
         </View>
       ) : (
-        <Animated.FlatList
-          data={safeFeed}
-          keyExtractor={(item) => item.user._id}
-          horizontal
-          pagingEnabled={false}
-          snapToInterval={CARD_WIDTH + CARD_SPACING}
-          decelerationRate="fast"
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{
-            paddingHorizontal: SIDE_SPACING,
-            paddingTop: 16,
-            paddingBottom: 80,
-          }}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { useNativeDriver: true }
-          )}
-          scrollEventThrottle={16}
-          renderItem={({ item, index }: { item: FeedItem; index: number }) => {
-            const inputRange = [
-              (index - 1) * (CARD_WIDTH + CARD_SPACING),
-              index * (CARD_WIDTH + CARD_SPACING),
-              (index + 1) * (CARD_WIDTH + CARD_SPACING),
-            ];
-            const scale = scrollX.interpolate({
-              inputRange,
-              outputRange: [0.88, 1, 0.88],
-              extrapolate: 'clamp',
-            });
-            const opacity = scrollX.interpolate({
-              inputRange,
-              outputRange: [0.6, 1, 0.6],
-              extrapolate: 'clamp',
-            });
+        <View style={styles.sphereWrapper}>
+          <Text style={styles.sphereHint}>Drag to spin · tap a face to open</Text>
 
-            const crossedLabel =
-              item.crossingCount > 1
-                ? `${item.crossingCount}× crossed`
-                : 'Nearby now';
+          <ProfileSphere
+            items={safeFeed}
+            size={SPHERE_SIZE}
+            onItemTap={(item) => setDetailItem(item)}
+            onFrontItemChange={setFrontItem}
+          />
 
-            return (
-              <Animated.View
-                style={[
-                  styles.card,
-                  {
-                    transform: [{ scale }],
-                    opacity,
-                    marginRight: CARD_SPACING,
-                  },
-                ]}
-              >
-                <TouchableOpacity
-                  activeOpacity={0.95}
-                  onPress={() => setDetailItem(item)}
-                  style={styles.cardTouchable}
-                >
-                  <Image
-                    source={
-                      item.user.photoURL
-                        ? { uri: item.user.photoURL }
-                        : { uri: 'https://placehold.co/400x600/eee/ccc?text=No+Photo' }
-                    }
-                    style={styles.cardPhoto}
-                  />
-
-                  {/* Gradient overlay */}
-                  <View style={styles.cardGradient} />
-
-                  {/* Crossed badge */}
-                  <View style={styles.crossedBadge}>
-                    <Text style={styles.crossedText}>🚶 {crossedLabel}</Text>
-                  </View>
-
-                  {/* Info */}
-                  <View style={styles.cardInfo}>
-                    <Text style={styles.cardName}>
-                      {item.user.displayName}, {item.user.age}
+          {/* Front-most profile preview + actions */}
+          {frontItem && (
+            <View style={styles.frontPanel}>
+              <View style={styles.frontInfoRow}>
+                <Text style={styles.frontName} numberOfLines={1}>
+                  {frontItem.user.displayName}, {frontItem.user.age}
+                </Text>
+                {intentBadge((frontItem.user as any).intent) && (
+                  <View style={styles.intentBadge}>
+                    <Text style={styles.intentBadgeText}>
+                      {intentBadge((frontItem.user as any).intent)}
                     </Text>
-                    {item.user.occupation ? (
-                      <Text style={styles.cardOccupation}>{item.user.occupation}</Text>
-                    ) : null}
                   </View>
+                )}
+              </View>
+              {frontItem.user.occupation ? (
+                <Text style={styles.frontOccupation} numberOfLines={1}>
+                  {frontItem.user.occupation}
+                </Text>
+              ) : null}
+
+              <View style={styles.cardActions}>
+                <TouchableOpacity
+                  style={styles.passBtn}
+                  onPress={() => handlePass(frontItem)}
+                >
+                  <Text style={styles.passIcon}>✕</Text>
                 </TouchableOpacity>
 
-                {/* Action Buttons */}
-                <View style={styles.cardActions}>
-                  <TouchableOpacity
-                    style={styles.passBtn}
-                    onPress={() => handlePass(item)}
-                  >
-                    <Text style={styles.passIcon}>✕</Text>
-                  </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.starBtn, limitReached && styles.btnLocked]}
+                  onPress={() => handleStar(frontItem)}
+                  disabled={limitReached}
+                >
+                  <Text style={styles.starIcon}>⭐</Text>
+                </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.starBtn}
-                    onPress={() => handleStar(item)}
-                  >
-                    <Text style={styles.starIcon}>⭐</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.likeBtn}
-                    onPress={() => handleLike(item)}
-                  >
-                    <Text style={styles.likeIcon}>❤</Text>
-                  </TouchableOpacity>
-                </View>
-              </Animated.View>
-            );
-          }}
-        />
+                <TouchableOpacity
+                  style={[styles.likeBtn, limitReached && styles.btnLocked]}
+                  onPress={() => handleLike(frontItem)}
+                  disabled={limitReached}
+                >
+                  <Text style={styles.likeIcon}>❤</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
       )}
 
       {/* User Detail Modal */}
@@ -323,6 +336,35 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   locationWarningText: { fontSize: 13, color: '#856404', textAlign: 'center' },
+
+  // Daily picks banner — anchors the no-swipe model
+  dailyBanner: {
+    backgroundColor: '#FFF0F4',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  dailyBannerLocked: {
+    backgroundColor: '#F0E6E8',
+  },
+  dailyBannerText: {
+    fontSize: 13,
+    color: '#FF4B6E',
+    fontWeight: '600',
+  },
+
+  // Intent badge — used on the front-item panel
+  intentBadge: {
+    backgroundColor: 'rgba(255,75,110,0.92)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginLeft: 8,
+  },
+  intentBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+
+  // Locked action buttons
+  btnLocked: { opacity: 0.4 },
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -333,66 +375,31 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 22, fontWeight: '700', color: '#333', marginBottom: 10 },
   emptyText:  { fontSize: 15, color: '#888', textAlign: 'center', lineHeight: 22 },
 
-  // Card
-  card: {
-    width: CARD_WIDTH,
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 5,
+  // Sphere
+  sphereWrapper: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 10,
   },
-  cardTouchable: {
+  sphereHint: {
+    fontSize: 12,
+    color: '#999',
+    marginBottom: 6,
+  },
+  frontPanel: {
     width: '100%',
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    alignItems: 'center',
   },
-  cardPhoto: {
-    width: '100%',
-    height: CARD_WIDTH * 1.35,
-    resizeMode: 'cover',
-    backgroundColor: '#eee',
+  frontInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  cardGradient: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: CARD_WIDTH * 0.55,
-    backgroundColor: 'transparent',
-    // Simulated gradient using shadow
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
-  },
-  crossedBadge: {
-    position: 'absolute',
-    top: 12,
-    left: 10,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  crossedText: { color: '#fff', fontSize: 11, fontWeight: '600' },
-  cardInfo: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  cardName: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#fff',
-  },
-  cardOccupation: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 2,
-  },
+  frontName: { fontSize: 20, fontWeight: '800', color: '#222' },
+  frontOccupation: { fontSize: 13, color: '#777', marginTop: 2 },
 
   // Actions
   cardActions: {
@@ -400,8 +407,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     gap: 16,
-    paddingVertical: 14,
-    backgroundColor: '#fff',
+    paddingTop: 14,
+    paddingBottom: 6,
+    backgroundColor: 'transparent',
   },
   passBtn: {
     width: 44,

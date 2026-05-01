@@ -21,6 +21,13 @@ import { Server as IOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import Match from './models/Match';
 import Message from './models/Message';
+import User from './models/User';
+import {
+  REPLY_TIMER_MS,
+  AUTO_UNMATCH_MS,
+  ENGAGE_REPLY_FAST,
+  ENGAGE_REPLY_LATE,
+} from './constants/limits';
 
 interface AuthSocket extends Socket {
   userId?: string;
@@ -92,6 +99,25 @@ export function initSocket(httpServer: HTTPServer): IOServer {
           return;
         }
 
+        // Anti-ghosting: score the sender if this is a reply to the other party
+        if (
+          match.lastSenderId &&
+          match.lastMessageAt &&
+          match.lastSenderId.toString() !== userId
+        ) {
+          const elapsed = Date.now() - new Date(match.lastMessageAt).getTime();
+          const delta   = elapsed <= REPLY_TIMER_MS ? ENGAGE_REPLY_FAST : ENGAGE_REPLY_LATE;
+          await User.updateOne({ _id: userId }, { $inc: { engagementScore: delta } });
+          await User.updateOne(
+            { _id: userId, engagementScore: { $gt: 100 } },
+            { $set: { engagementScore: 100 } }
+          );
+          await User.updateOne(
+            { _id: userId, engagementScore: { $lt: 0 } },
+            { $set: { engagementScore: 0 } }
+          );
+        }
+
         const message = await Message.create({
           match:  matchId,
           sender: userId,
@@ -99,10 +125,14 @@ export function initSocket(httpServer: HTTPServer): IOServer {
         });
 
         const otherUserId = match.users.find((id) => id.toString() !== userId)!;
+        const now = new Date();
 
         await Match.findByIdAndUpdate(matchId, {
           lastMessage:   text.trim(),
-          lastMessageAt: new Date(),
+          lastMessageAt: now,
+          lastSenderId:  userId,
+          replyDueAt:    new Date(now.getTime() + REPLY_TIMER_MS),
+          autoUnmatchAt: new Date(now.getTime() + AUTO_UNMATCH_MS),
           $inc: { [`unreadCount.${otherUserId}`]: 1 },
         });
 

@@ -30,9 +30,12 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
+import { Modal } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 import { updateUserProfile, uploadProfilePhoto } from '../../services/userService';
+import { submitVerification } from '../../services/safetyService';
 import PreferencesModal from '../../components/PreferencesModal';
+import SafetyScreen from './SafetyScreen';
 
 // ─── Colours ──────────────────────────────────────────────────────────────────
 
@@ -108,6 +111,8 @@ export default function ProfileScreen() {
   const [uploadingIdx,     setUploadingIdx]     = useState<number | null>(null);
   const [photoVersions,    setPhotoVersions]    = useState<Record<number, number>>({});
   const [showPreferences,  setShowPreferences]  = useState(false);
+  const [showSafety,       setShowSafety]       = useState(false);
+  const [verifyingNow,     setVerifyingNow]     = useState(false);
 
   if (!profile) return null;
 
@@ -169,6 +174,41 @@ export default function ProfileScreen() {
     }
   };
 
+  // ── Verify identity (inline — no need to open Safety) ──────────────────────
+  // Tapping Verify opens the front camera straight to record. Gallery is not
+  // an option (launchCameraAsync, not launchImageLibraryAsync) so the user
+  // physically has to record on the spot.
+  const handleVerify = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Camera required', 'Please allow camera access in Settings to record your selfie video.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes:       ['videos'],
+      cameraType:       ImagePicker.CameraType.front,
+      videoMaxDuration: 15,
+      quality:          0.7,
+    });
+    if (result.canceled || !result.assets.length) return;
+
+    setVerifyingNow(true);
+    try {
+      const res = await submitVerification(result.assets[0].uri);
+      setProfile({ ...profile, verification: res.verification, trustScore: res.trustScore });
+      Alert.alert(
+        res.verification.status === 'verified' ? 'Verified \u2713' : 'Submitted',
+        res.verification.status === 'verified'
+          ? "You're verified — your profile now shows the green badge."
+          : 'Your submission is in review.',
+      );
+    } catch (err: any) {
+      Alert.alert('Upload failed', err?.message ?? 'Could not submit verification.');
+    } finally {
+      setVerifyingNow(false);
+    }
+  };
+
   // ── Logout ──────────────────────────────────────────────────────────────────
   const handleLogout = () => {
     Alert.alert('Log out', 'Are you sure you want to log out?', [
@@ -195,9 +235,11 @@ export default function ProfileScreen() {
             <Text style={st.nameText} numberOfLines={1}>
               {profile.displayName}
             </Text>
-            {/* verified badge (shown when profile ≥ 70% complete) */}
-            {pct >= 70 && (
-              <Ionicons name="checkmark-circle" size={24} color="#4B9EFF" style={{ marginLeft: 6 }} />
+            {/* Identity-verified shield — only when verification.status is
+                'verified'. No fallback icon: any check next to the name MUST
+                mean the user actually completed the selfie-video verification. */}
+            {profile.verification?.status === 'verified' && (
+              <Ionicons name="shield-checkmark" size={24} color="#22C55E" style={{ marginLeft: 6 }} />
             )}
           </View>
 
@@ -304,6 +346,61 @@ export default function ProfileScreen() {
           )}
         </Card>
 
+        {/* ── Verification card (Phase 2) ── */}
+        {profile.verification?.status === 'verified' ? (
+          <Card style={[st.verifyCardVerified, { marginBottom: 14 }]}>
+            <View style={st.verifyRow}>
+              <View style={st.verifyShieldVerified}>
+                <Ionicons name="shield-checkmark" size={26} color={WHITE} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.verifyTitleVerified}>You\u2019re verified</Text>
+                <Text style={st.verifySub}>
+                  Trust score: {profile.trustScore ?? 0}/100
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={st.verifyResubmit}
+                onPress={handleVerify}
+                disabled={verifyingNow}
+                activeOpacity={0.8}
+              >
+                {verifyingNow
+                  ? <ActivityIndicator size="small" color={DARK} />
+                  : <Text style={st.verifyResubmitText}>Re-submit</Text>}
+              </TouchableOpacity>
+            </View>
+          </Card>
+        ) : (
+          <Card style={{ marginBottom: 14 }}>
+            <View style={st.verifyRow}>
+              <View style={st.verifyShield}>
+                <Ionicons name="shield-outline" size={26} color={BRAND} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={st.verifyTitle}>Get verified</Text>
+                <Text style={st.verifySub}>
+                  {profile.verification?.status === 'pending'
+                    ? 'Your video is in review.'
+                    : 'Record a short selfie video — get a green badge and +40 trust points.'}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={[st.verifyCTA, verifyingNow && { opacity: 0.6 }]}
+              onPress={handleVerify}
+              disabled={verifyingNow || profile.verification?.status === 'pending'}
+              activeOpacity={0.85}
+            >
+              {verifyingNow
+                ? <ActivityIndicator color={WHITE} />
+                : <Text style={st.verifyCTAText}>
+                    {profile.verification?.status === 'pending' ? 'In review' : 'Record selfie video'}
+                  </Text>}
+            </TouchableOpacity>
+          </Card>
+        )}
+
         {/* ── Spark Premium card ── */}
         <View style={[st.premiumCard, { marginBottom: 14 }]}>
           <Text style={st.premiumTitle}>Spark Premium</Text>
@@ -385,8 +482,8 @@ export default function ProfileScreen() {
           <View style={st.menuSep} />
           <MenuRow
             iconName="shield-checkmark-outline"
-            label="Safety guide"
-            onPress={() => comingSoon('Safety guide')}
+            label="Safety"
+            onPress={() => setShowSafety(true)}
           />
           <View style={st.menuSep} />
           <MenuRow
@@ -413,6 +510,16 @@ export default function ProfileScreen() {
         visible={showPreferences}
         onClose={() => setShowPreferences(false)}
       />
+
+      {/* Safety full-screen modal */}
+      <Modal
+        visible={showSafety}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowSafety(false)}
+      >
+        <SafetyScreen onClose={() => setShowSafety(false)} />
+      </Modal>
 
     </SafeAreaView>
   );
@@ -585,6 +692,48 @@ const st = StyleSheet.create({
     fontSize:   15,
     fontWeight: '700',
   },
+
+  /* ── Verification card (Phase 2) ── */
+  verifyCardVerified: {
+    backgroundColor: '#EAF7EE',
+    borderWidth: 1.5,
+    borderColor: '#22C55E',
+  },
+  verifyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  verifyShield: {
+    width: 48, height: 48, borderRadius: 14,
+    backgroundColor: '#FFF0F4',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  verifyShieldVerified: {
+    width: 48, height: 48, borderRadius: 14,
+    backgroundColor: '#22C55E',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  verifyTitle:         { fontSize: 17, fontWeight: '700', color: DARK },
+  verifyTitleVerified: { fontSize: 17, fontWeight: '700', color: '#15803D' },
+  verifySub:           { fontSize: 13, color: GRAY, marginTop: 2 },
+
+  verifyCTA: {
+    marginTop: 14,
+    backgroundColor: BRAND,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  verifyCTAText: { color: WHITE, fontWeight: '700', fontSize: 15 },
+
+  verifyResubmit: {
+    backgroundColor: WHITE,
+    borderWidth: 1, borderColor: '#22C55E',
+    borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 8,
+  },
+  verifyResubmitText: { color: '#15803D', fontWeight: '700', fontSize: 13 },
 
   /* ── Premium card ── */
   premiumCard: {

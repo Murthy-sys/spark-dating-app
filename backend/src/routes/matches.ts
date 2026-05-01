@@ -9,6 +9,7 @@ import {
   getStarredUsers,
   getLikedUsers,
   unlikeUser,
+  getDailyStatus,
 } from '../controllers/matchController';
 import { protect } from '../middleware/auth';
 
@@ -20,6 +21,7 @@ router.post('/like/:userId',      likeUser);
 router.post('/star/:userId',      starUser);
 router.delete('/star/:userId',    unstarUser);
 router.delete('/unlike/:userId',  unlikeUser);
+router.get('/daily-status',       getDailyStatus);
 router.get('/starred',            getStarredUsers);
 router.get('/liked',              getLikedUsers);
 router.get('/',                   getMatches);

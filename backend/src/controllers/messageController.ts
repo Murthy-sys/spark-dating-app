@@ -1,8 +1,49 @@
 import { Response, NextFunction } from 'express';
 import Match from '../models/Match';
 import Message from '../models/Message';
+import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { uploadImage } from '../middleware/upload';
+import {
+  REPLY_TIMER_MS,
+  AUTO_UNMATCH_MS,
+  ENGAGE_REPLY_FAST,
+  ENGAGE_REPLY_LATE,
+} from '../constants/limits';
+
+// ─── Engagement bookkeeping helper ───────────────────────────────────────────
+
+/**
+ * When a user sends a message that's a *reply* to the other party, adjust the
+ * sender's engagement score based on how quickly they replied.
+ *
+ * Returns the score delta applied (0 if not a reply / nothing to do) so the
+ * caller can include it in the response if useful for debugging.
+ */
+async function applyReplyEngagement(
+  senderId: any,
+  prevSenderId: any,
+  prevMessageAt: Date | null
+): Promise<number> {
+  // Not a reply if there was no previous message, or sender == prev sender
+  if (!prevSenderId || !prevMessageAt) return 0;
+  if (senderId.toString() === prevSenderId.toString()) return 0;
+
+  const elapsed = Date.now() - new Date(prevMessageAt).getTime();
+  const delta   = elapsed <= REPLY_TIMER_MS ? ENGAGE_REPLY_FAST : ENGAGE_REPLY_LATE;
+
+  await User.updateOne({ _id: senderId }, { $inc: { engagementScore: delta } });
+  // Clamp 0–100 — Mongo $inc can't clamp directly
+  await User.updateOne(
+    { _id: senderId, engagementScore: { $gt: 100 } },
+    { $set: { engagementScore: 100 } }
+  );
+  await User.updateOne(
+    { _id: senderId, engagementScore: { $lt: 0 } },
+    { $set: { engagementScore: 0 } }
+  );
+  return delta;
+}
 
 // ─── Get Messages for a Match ─────────────────────────────────────────────────
 
@@ -51,13 +92,21 @@ export async function sendMessage(req: AuthRequest, res: Response, next: NextFun
     const match = await Match.findOne({ _id: matchId, users: myId, isActive: true });
     if (!match) return res.status(403).json({ success: false, message: 'Not authorized' });
 
+    // Compute engagement delta against the *previous* state before we overwrite it
+    await applyReplyEngagement(myId, match.lastSenderId, match.lastMessageAt);
+
     const message = await Message.create({ match: matchId, sender: myId, text: text.trim() });
 
-    // Update match preview + increment other user's unread count
+    // Update match preview, increment other user's unread, push the reply timer
+    // and auto-unmatch deadline forward (the recipient now owes the next reply).
     const otherUserId = match.users.find((id) => id.toString() !== myId.toString())!;
+    const now = new Date();
     await Match.findByIdAndUpdate(matchId, {
       lastMessage:   text.trim(),
-      lastMessageAt: new Date(),
+      lastMessageAt: now,
+      lastSenderId:  myId,
+      replyDueAt:    new Date(now.getTime() + REPLY_TIMER_MS),
+      autoUnmatchAt: new Date(now.getTime() + AUTO_UNMATCH_MS),
       $inc: { [`unreadCount.${otherUserId}`]: 1 },
     });
 
@@ -85,6 +134,8 @@ export async function sendImageMessage(req: AuthRequest, res: Response, next: Ne
     const publicId  = `chat_${matchId}_${Date.now()}`;
     const { url }   = await uploadImage(req.file.buffer, publicId, 'spark/chat', baseUrl);
 
+    await applyReplyEngagement(myId, match.lastSenderId, match.lastMessageAt);
+
     const message = await Message.create({
       match: matchId,
       sender: myId,
@@ -93,9 +144,13 @@ export async function sendImageMessage(req: AuthRequest, res: Response, next: Ne
     });
 
     const otherUserId = match.users.find((id) => id.toString() !== myId.toString())!;
+    const now = new Date();
     await Match.findByIdAndUpdate(matchId, {
       lastMessage:   '📷 Photo',
-      lastMessageAt: new Date(),
+      lastMessageAt: now,
+      lastSenderId:  myId,
+      replyDueAt:    new Date(now.getTime() + REPLY_TIMER_MS),
+      autoUnmatchAt: new Date(now.getTime() + AUTO_UNMATCH_MS),
       $inc: { [`unreadCount.${otherUserId}`]: 1 },
     });
 

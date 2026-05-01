@@ -38,7 +38,7 @@ import { updateUserProfile } from '../../services/userService';
 
 const BRAND        = '#FF4B6E';
 const BRAND_LIGHT  = 'rgba(255,75,110,0.08)';
-const TOTAL_STEPS  = 7;
+const TOTAL_STEPS  = 8;
 const ABOUT_MIN    = 10;
 const ABOUT_MAX    = 300;
 
@@ -54,14 +54,23 @@ const RELATIONSHIP_OPTIONS = [
   { id: 'serious'    as const, label: 'Serious Relationship', icon: '💜', desc: 'Ready for something real'           },
 ];
 
+const INTENT_OPTIONS = [
+  { id: 'serious'    as const, label: 'Serious relationship', icon: '💍', desc: 'I’m ready for something committed' },
+  { id: 'casual'     as const, label: 'Casual dating',        icon: '🍷', desc: 'Open to fun, low-pressure dates'   },
+  { id: 'friends'    as const, label: 'Friends',              icon: '🤝', desc: 'New people, no romance expected'   },
+  { id: 'networking' as const, label: 'Networking',           icon: '💼', desc: 'Career or community connections'   },
+];
+
 /* ──────────────────────────────── types ────────────────────────────────── */
 
 type RelOption = 'friendship' | 'casual' | 'serious';
+type IntentOption = 'serious' | 'casual' | 'friends' | 'networking';
 
 interface FormData {
   gender:       'male' | 'female' | '';
   about:        string;
   hobbies:      string[];
+  intent:       IntentOption | '';
   relationship: RelOption[];
   conduct:      boolean;
   terms:        boolean;
@@ -71,6 +80,7 @@ const INITIAL_FORM: FormData = {
   gender:       '',
   about:        '',
   hobbies:      [],
+  intent:       '',
   relationship: [],
   conduct:      false,
   terms:        false,
@@ -321,7 +331,39 @@ function HobbiesStep({
   );
 }
 
-/* ── Step 4 ─ Relationship Preferences ───────────────────────────────── */
+/* ── Step 4 ─ Primary Intent (single-choice — drives intent-first matching) ── */
+function IntentStep({
+  value,
+  onChange,
+}: {
+  value: IntentOption | '';
+  onChange: (v: IntentOption) => void;
+}) {
+  return (
+    <View style={s.stepPad}>
+      {INTENT_OPTIONS.map(o => {
+        const active = value === o.id;
+        return (
+          <TouchableOpacity
+            key={o.id}
+            style={[s.optCard, active && s.optCardActive]}
+            onPress={() => onChange(o.id)}
+            activeOpacity={0.8}
+          >
+            <Text style={s.optIcon}>{o.icon}</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={[s.optLabel, active && s.optLabelActive]}>{o.label}</Text>
+              <Text style={s.optDesc}>{o.desc}</Text>
+            </View>
+            {active && <Text style={s.optCheck}>✓</Text>}
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+/* ── Step 5 ─ Relationship Preferences (multi-select, secondary) ────── */
 function RelationshipStep({
   value,
   onChange,
@@ -430,6 +472,10 @@ function ReviewStep({ data }: { data: FormData }) {
       value: data.hobbies.join(', '),
     },
     {
+      label: 'Primary intent',
+      value: INTENT_OPTIONS.find(o => o.id === data.intent)?.label ?? '—',
+    },
+    {
       label: 'Looking for',
       value: data.relationship
         .map(r => RELATIONSHIP_OPTIONS.find(o => o.id === r)?.label ?? '')
@@ -478,13 +524,15 @@ export default function SetupProfileScreen() {
       case 1: return !!form.gender;
       case 2: return form.about.length >= ABOUT_MIN && form.about.length <= ABOUT_MAX;
       case 3: return form.hobbies.length > 0;
-      case 4: return form.relationship.length > 0;
-      case 5: return form.conduct;
-      case 6: return form.terms;
-      case 7: return (
+      case 4: return !!form.intent;
+      case 5: return form.relationship.length > 0;
+      case 6: return form.conduct;
+      case 7: return form.terms;
+      case 8: return (
         !!form.gender &&
         form.about.length >= ABOUT_MIN && form.about.length <= ABOUT_MAX &&
         form.hobbies.length > 0 &&
+        !!form.intent &&
         form.relationship.length > 0 &&
         form.conduct &&
         form.terms
@@ -506,6 +554,7 @@ export default function SetupProfileScreen() {
         gender:    form.gender as any,
         bio:       form.about,
         hobbies:   form.hobbies,
+        intent:    form.intent || null,
         lookingFor: form.relationship,
       } as any);
       setProfile({ ...profile!, ...updated });
@@ -523,15 +572,16 @@ export default function SetupProfileScreen() {
     1: { title: "What's your gender?",      subtitle: "Select the option that best describes you."          },
     2: { title: 'About You',                subtitle: 'Write a short bio so others can get to know you.'    },
     3: { title: 'Your Hobbies',             subtitle: 'Pick things you enjoy — they help us find your people.' },
-    4: { title: 'What are you looking for?',subtitle: 'You can pick more than one — no judgement here.'     },
-    5: { title: 'Community Guidelines',     subtitle: "We're building a safe space for everyone."           },
-    6: { title: 'Terms & Conditions',       subtitle: 'Almost there — one last thing.'                      },
-    7: { title: 'Review Your Profile',      subtitle: 'Everything looks good? Let\'s go!'                   },
+    4: { title: 'Why are you here?',        subtitle: 'Pick the one that fits best — we’ll match you with people looking for the same thing.' },
+    5: { title: 'Open to…',                 subtitle: 'You can pick more than one — no judgement here.'     },
+    6: { title: 'Community Guidelines',     subtitle: "We're building a safe space for everyone."           },
+    7: { title: 'Terms & Conditions',       subtitle: 'Almost there — one last thing.'                      },
+    8: { title: 'Review Your Profile',      subtitle: 'Everything looks good? Let\'s go!'                   },
   };
   const { title, subtitle } = STEPS[step];
 
   const nextLabel =
-    step === TOTAL_STEPS ? '✨  Complete Profile' : 'Continue  →';
+    step === TOTAL_STEPS ? '\u2728  Complete Profile' : 'Continue  \u2192';
 
   return (
     <SafeAreaView style={s.root}>
@@ -568,10 +618,11 @@ export default function SetupProfileScreen() {
               {step === 1 && <GenderStep       value={form.gender}       onChange={set('gender')}       />}
               {step === 2 && <AboutStep        value={form.about}        onChange={set('about')}        />}
               {step === 3 && <HobbiesStep      value={form.hobbies}      onChange={set('hobbies')}      />}
-              {step === 4 && <RelationshipStep value={form.relationship}  onChange={set('relationship')} />}
-              {step === 5 && <ConductStep      value={form.conduct}       onChange={set('conduct')}      />}
-              {step === 6 && <TermsStep        value={form.terms}         onChange={set('terms')}        />}
-              {step === 7 && <ReviewStep       data={form}                                               />}
+              {step === 4 && <IntentStep       value={form.intent}        onChange={set('intent')}       />}
+              {step === 5 && <RelationshipStep value={form.relationship}  onChange={set('relationship')} />}
+              {step === 6 && <ConductStep      value={form.conduct}       onChange={set('conduct')}      />}
+              {step === 7 && <TermsStep        value={form.terms}         onChange={set('terms')}        />}
+              {step === 8 && <ReviewStep       data={form}                                               />}
             </View>
 
             {/* ── Navigation ── */}

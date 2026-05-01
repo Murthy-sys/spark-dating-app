@@ -10,7 +10,19 @@
  */
 
 import { apiClient } from './apiClient';
-import { LikeStatus, Match, UserProfile } from '../types';
+import { DailyStatus, LikeStatus, Match, UserProfile } from '../types';
+
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+/** Thrown when the user has used all DAILY_LIKE_LIMIT picks for the day. */
+export class DailyLimitError extends Error {
+  resetAt: string;
+  constructor(message: string, resetAt: string) {
+    super(message);
+    this.name    = 'DailyLimitError';
+    this.resetAt = resetAt;
+  }
+}
 
 // ─── Crossed-Paths Feed ───────────────────────────────────────────────────────
 
@@ -37,15 +49,43 @@ export async function getNearbyUsers(
 /**
  * Returns `isMatch: true` and `matchId` (MongoDB _id) when a mutual match is made.
  * matchId is guaranteed to be a string when isMatch is true.
+ *
+ * Throws `DailyLimitError` (HTTP 429) when the daily-pick budget is exhausted.
  */
 export async function likeUser(
   toUserId: string,
   status: LikeStatus = 'liked'
-): Promise<{ isMatch: boolean; matchId?: string }> {
-  const { data } = await apiClient.post(`/matches/like/${toUserId}`, { status });
+): Promise<{ isMatch: boolean; matchId?: string; daily?: DailyStatus }> {
+  try {
+    const { data } = await apiClient.post(`/matches/like/${toUserId}`, { status });
+    return {
+      isMatch: data.isMatch as boolean,
+      matchId: data.matchId as string | undefined,
+      daily:   data.daily   as DailyStatus | undefined,
+    };
+  } catch (err: any) {
+    const code = err?.response?.data?.code;
+    if (code === 'DAILY_LIMIT_REACHED') {
+      throw new DailyLimitError(
+        err.response.data.message ?? 'Daily limit reached',
+        err.response.data.resetAt,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Fetch the user's current daily-pick status — used to render the counter
+ * banner on Home and lock the action buttons when remaining hits 0.
+ */
+export async function getDailyStatus(): Promise<DailyStatus> {
+  const { data } = await apiClient.get('/matches/daily-status');
   return {
-    isMatch: data.isMatch as boolean,
-    matchId: data.matchId as string | undefined,
+    used:      data.used,
+    limit:     data.limit,
+    remaining: data.remaining,
+    resetAt:   data.resetAt,
   };
 }
 
