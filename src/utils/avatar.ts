@@ -1,20 +1,45 @@
 /**
- * avatar.ts — gender-aware fallback avatar for users without a photo.
+ * avatar.ts — fallback avatar for users without a photo.
  *
- * Uses DiceBear's "personas" style — a semi-3D illustrated portrait that
- * looks better than a coloured initial. The seed is the user's _id so the
- * same user always gets the same avatar. Background tint is gender-themed.
+ * One curated illustration per gender — same image for every user of that
+ * gender (no per-user variation). Picked for being clean, modern, and
+ * confident-looking, with a tasteful gradient backdrop.
  *
- * Free CDN, no API key, plain PNG so React Native's <Image> handles it.
+ *   female       → "lorelei"   style, fixed seed "Aria"
+ *   male         → "avataaars" style, fixed seed "Knox"
+ *   non-binary   → "notionists-neutral", fixed seed "Sky"
+ *   other / ?    → same as non-binary
  */
 
-const DICEBEAR_BASE = 'https://api.dicebear.com/7.x/personas/png';
+const DICEBEAR_BASE = 'https://api.dicebear.com/7.x';
 
-const BG_BY_GENDER: Record<string, string> = {
-  male:         'b6e3f4',  // soft blue
-  female:       'ffd5dc',  // soft pink
-  'non-binary': 'd1d4f9',  // soft lavender
-  other:        'e0e0e0',  // neutral
+interface AvatarPreset {
+  style: string;
+  seed:  string;
+  bg:    [string, string]; // gradient stops
+}
+
+const AVATAR_BY_GENDER: Record<string, AvatarPreset> = {
+  female: {
+    style: 'lorelei',
+    seed:  'Aria',
+    bg:    ['FF8FB1', 'FFD0DC'], // rose → blush
+  },
+  male: {
+    style: 'avataaars',
+    seed:  'Knox',
+    bg:    ['5E8BFF', 'B6D0FF'], // royal blue → sky
+  },
+  'non-binary': {
+    style: 'notionists-neutral',
+    seed:  'Sky',
+    bg:    ['B095FF', 'E0D4FF'], // violet → lilac
+  },
+  other: {
+    style: 'notionists-neutral',
+    seed:  'Sky',
+    bg:    ['B095FF', 'E0D4FF'],
+  },
 };
 
 interface AvatarUser {
@@ -23,9 +48,16 @@ interface AvatarUser {
 }
 
 export function getDefaultAvatarUrl(user: AvatarUser, size = 400): string {
-  const seed = encodeURIComponent(user._id || 'spark-anon');
-  const bg   = BG_BY_GENDER[user.gender ?? ''] ?? BG_BY_GENDER.other;
-  return `${DICEBEAR_BASE}?seed=${seed}&backgroundColor=${bg}&size=${size}`;
+  const key = (user.gender ?? '') as keyof typeof AVATAR_BY_GENDER;
+  const p   = AVATAR_BY_GENDER[key] ?? AVATAR_BY_GENDER.other;
+  return (
+    `${DICEBEAR_BASE}/${p.style}/png` +
+    `?seed=${encodeURIComponent(p.seed)}` +
+    `&size=${size}` +
+    `&backgroundType=gradientLinear` +
+    `&backgroundColor=${p.bg[0]},${p.bg[1]}` +
+    `&backgroundRotation=45`
+  );
 }
 
 /**

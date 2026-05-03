@@ -1,7 +1,7 @@
 /**
- * HomeScreen.tsx — Nearby / Crossed-Paths discovery via a rotatable
- * pseudo-3D sphere of profile avatars (see ProfileSphere). Tap a face
- * to open details; like / star / pass acts on the front-most profile.
+ * HomeScreen.tsx — Nearby / Crossed-Paths discovery via a modern swipeable
+ * card stack (see ProfileCardStack). Swipe right = like, left = pass,
+ * up = crush. Tap a card to open the full detail modal.
  */
 
 import React, { useEffect, useState, useCallback } from 'react';
@@ -11,7 +11,6 @@ import {
   StyleSheet,
   SafeAreaView,
   ActivityIndicator,
-  Dimensions,
   TouchableOpacity,
   Alert,
 } from 'react-native';
@@ -28,20 +27,8 @@ import {
 import { useLocation } from '../../hooks/useLocation';
 import MatchModal from '../../components/MatchModal';
 import UserDetailModal from '../../components/UserDetailModal';
-import ProfileSphere from '../../components/ProfileSphere';
+import ProfileCardStack from '../../components/ProfileCardStack';
 import { DailyStatus, UserProfile } from '../../types';
-
-// ─── Intent labels (mirrors backend Intent type) ─────────────────────────────
-const INTENT_LABEL: Record<string, string> = {
-  serious:    'Serious',
-  casual:     'Casual',
-  friends:    'Friends',
-  networking: 'Networking',
-};
-
-function intentBadge(intent?: string | null): string | null {
-  return intent ? INTENT_LABEL[intent] ?? null : null;
-}
 
 function hoursUntil(iso?: string): string {
   if (!iso) return 'soon';
@@ -50,9 +37,6 @@ function hoursUntil(iso?: string): string {
   const h = Math.ceil(ms / 3_600_000);
   return h <= 1 ? '1h' : `${h}h`;
 }
-
-const { width } = Dimensions.get('window');
-const SPHERE_SIZE = Math.min(width - 24, 380);
 
 type FeedItem  = { user: UserProfile; crossingCount: number; crossedAt: string };
 type MatchState = { user: UserProfile; matchId: string } | null;
@@ -67,7 +51,6 @@ export default function HomeScreen() {
   const [matchState, setMatchState] = useState<MatchState>(null);
   const [detailItem, setDetailItem] = useState<FeedItem | null>(null);
   const [daily, setDaily]           = useState<DailyStatus | null>(null);
-  const [frontItem, setFrontItem]   = useState<FeedItem | null>(null);
 
   // Initial fetch of daily-pick budget; refreshed on every successful like.
   useEffect(() => {
@@ -228,64 +211,14 @@ export default function HomeScreen() {
           </Text>
         </View>
       ) : (
-        <View style={styles.sphereWrapper}>
-          <Text style={styles.sphereHint}>Drag to spin · tap a face to open</Text>
-
-          <ProfileSphere
-            items={safeFeed}
-            size={SPHERE_SIZE}
-            onItemTap={(item) => setDetailItem(item)}
-            onFrontItemChange={setFrontItem}
-          />
-
-          {/* Front-most profile preview + actions */}
-          {frontItem && (
-            <View style={styles.frontPanel}>
-              <View style={styles.frontInfoRow}>
-                <Text style={styles.frontName} numberOfLines={1}>
-                  {frontItem.user.displayName}, {frontItem.user.age}
-                </Text>
-                {intentBadge((frontItem.user as any).intent) && (
-                  <View style={styles.intentBadge}>
-                    <Text style={styles.intentBadgeText}>
-                      {intentBadge((frontItem.user as any).intent)}
-                    </Text>
-                  </View>
-                )}
-              </View>
-              {frontItem.user.occupation ? (
-                <Text style={styles.frontOccupation} numberOfLines={1}>
-                  {frontItem.user.occupation}
-                </Text>
-              ) : null}
-
-              <View style={styles.cardActions}>
-                <TouchableOpacity
-                  style={styles.passBtn}
-                  onPress={() => handlePass(frontItem)}
-                >
-                  <Text style={styles.passIcon}>✕</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.starBtn, limitReached && styles.btnLocked]}
-                  onPress={() => handleStar(frontItem)}
-                  disabled={limitReached}
-                >
-                  <Text style={styles.starIcon}>⭐</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.likeBtn, limitReached && styles.btnLocked]}
-                  onPress={() => handleLike(frontItem)}
-                  disabled={limitReached}
-                >
-                  <Text style={styles.likeIcon}>❤</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-        </View>
+        <ProfileCardStack
+          items={safeFeed}
+          disabled={limitReached}
+          onTap={(item) => setDetailItem(item)}
+          onLike={(item) => handleLike(item)}
+          onPass={(item) => handlePass(item)}
+          onStar={(item) => handleStar(item)}
+        />
       )}
 
       {/* User Detail Modal */}
@@ -353,18 +286,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // Intent badge — used on the front-item panel
-  intentBadge: {
-    backgroundColor: 'rgba(255,75,110,0.92)',
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginLeft: 8,
-  },
-  intentBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-
-  // Locked action buttons
-  btnLocked: { opacity: 0.4 },
   empty: {
     flex: 1,
     alignItems: 'center',
@@ -374,72 +295,4 @@ const styles = StyleSheet.create({
   emptyEmoji: { fontSize: 60, marginBottom: 16 },
   emptyTitle: { fontSize: 22, fontWeight: '700', color: '#333', marginBottom: 10 },
   emptyText:  { fontSize: 15, color: '#888', textAlign: 'center', lineHeight: 22 },
-
-  // Sphere
-  sphereWrapper: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 10,
-  },
-  sphereHint: {
-    fontSize: 12,
-    color: '#999',
-    marginBottom: 6,
-  },
-  frontPanel: {
-    width: '100%',
-    paddingHorizontal: 24,
-    paddingTop: 8,
-    alignItems: 'center',
-  },
-  frontInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  frontName: { fontSize: 20, fontWeight: '800', color: '#222' },
-  frontOccupation: { fontSize: 13, color: '#777', marginTop: 2 },
-
-  // Actions
-  cardActions: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 16,
-    paddingTop: 14,
-    paddingBottom: 6,
-    backgroundColor: 'transparent',
-  },
-  passBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  passIcon: { fontSize: 18, color: '#aaa' },
-  starBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FFF8E1',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  starIcon: { fontSize: 20 },
-  likeBtn: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    backgroundColor: '#FF4B6E',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#FF4B6E',
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  likeIcon: { fontSize: 22, color: '#fff' },
 });
