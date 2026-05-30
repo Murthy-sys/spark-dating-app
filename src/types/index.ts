@@ -155,6 +155,7 @@ export type RootStackParamList = {
   Auth: undefined;
   Onboarding: undefined;
   Main: undefined;
+  Subscription: undefined;
 };
 
 export type AuthStackParamList = {

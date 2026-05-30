@@ -24,10 +24,15 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAuthStore } from '../../store/authStore';
-import { getLikesReceived, likeUser } from '../../services/matchingService';
+import {
+  getLikesReceived,
+  likeUser,
+  isSubscriptionRequired,
+} from '../../services/matchingService';
 import { UserProfile } from '../../types';
 import MatchModal from '../../components/MatchModal';
 import UserDetailModal from '../../components/UserDetailModal';
+import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 const CARD_W = (width - 48) / 2;   // 2-col grid: 16px side padding + 16px gap
@@ -87,6 +92,28 @@ function LikeCard({
   );
 }
 
+// ─── Paywall State ────────────────────────────────────────────────────────────
+// Shown when the user hits /matches/likes-received without an active sub.
+
+function PaywallState({ onUpgrade, count }: { onUpgrade: () => void; count?: number }) {
+  return (
+    <View style={s.emptyWrap}>
+      <View style={s.paywallIconWrap}>
+        <Ionicons name="lock-closed" size={36} color={BRAND} />
+      </View>
+      <Text style={s.emptyTitle}>{count ? `${count} people liked you` : 'See who likes you'}</Text>
+      <Text style={s.emptyText}>
+        Unlock everyone who already liked your profile. Cancel autopay anytime.
+      </Text>
+      <View style={s.ctaWrap}>
+        <TouchableOpacity style={s.ctaPrimary} onPress={onUpgrade} activeOpacity={0.85}>
+          <Text style={s.ctaPrimaryText}>Try Spark Premium</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 // ─── Empty State ──────────────────────────────────────────────────────────────
 
 function EmptyState({ onImprove }: { onImprove: () => void }) {
@@ -115,18 +142,37 @@ export default function LikesScreen() {
 
   const [likers,     setLikers]     = useState<UserProfile[]>([]);
   const [loading,    setLoading]    = useState(true);
+  const [locked,     setLocked]     = useState(false);  // 402 from server
   const [matchState, setMatchState] = useState<MatchState>(null);
   const [detailUser, setDetailUser] = useState<UserProfile | null>(null);
 
   const load = useCallback(() => {
     if (!profile) return;
+    setLoading(true);
     getLikesReceived()
-      .then((results) => setLikers(results.map((r) => r.from)))
-      .catch(() => {})
+      .then((results) => {
+        setLikers(results.map((r) => r.from));
+        setLocked(false);
+      })
+      .catch((err) => {
+        if (isSubscriptionRequired(err)) {
+          setLocked(true);
+          setLikers([]);
+        }
+      })
       .finally(() => setLoading(false));
   }, [profile?._id]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Refresh whenever the screen comes into focus (e.g. after returning from
+  // SubscriptionScreen post-purchase) so the lock lifts without a restart.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', load);
+    return unsubscribe;
+  }, [navigation, load]);
+
+  const goToSubscription = () => navigation.navigate('Subscription');
 
   const handleLikeBack = async (other: UserProfile) => {
     const { isMatch, matchId } = await likeUser(other._id, 'liked');
@@ -169,7 +215,9 @@ export default function LikesScreen() {
       <Text style={s.subLine}>People who liked your profile</Text>
 
       {/* ── Content ── */}
-      {likers.length === 0 ? (
+      {locked ? (
+        <PaywallState onUpgrade={goToSubscription} />
+      ) : likers.length === 0 ? (
         <EmptyState onImprove={goToProfile} />
       ) : (
         <FlatList
@@ -320,6 +368,12 @@ const s = StyleSheet.create({
     paddingBottom: 60,
   },
   catEmoji:   { fontSize: 80, marginBottom: 20 },
+  paywallIconWrap: {
+    width: 88, height: 88, borderRadius: 44,
+    backgroundColor: '#FFE5EA',
+    alignItems: 'center', justifyContent: 'center',
+    marginBottom: 20,
+  },
   emptyTitle: {
     fontSize: 24, fontWeight: '800',
     color: DARK, marginBottom: 10,

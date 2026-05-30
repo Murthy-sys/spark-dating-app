@@ -13,12 +13,14 @@ import { errorHandler, notFound } from './middleware/errorHandler';
 import { verifyEmailService } from './services/emailService';
 
 // Routes
-import authRoutes     from './routes/auth';
-import userRoutes     from './routes/users';
-import crossingRoutes from './routes/crossings';
-import matchRoutes    from './routes/matches';
-import messageRoutes  from './routes/messages';
-import safetyRoutes   from './routes/safety';
+import authRoutes         from './routes/auth';
+import userRoutes         from './routes/users';
+import crossingRoutes     from './routes/crossings';
+import matchRoutes        from './routes/matches';
+import messageRoutes      from './routes/messages';
+import safetyRoutes       from './routes/safety';
+import subscriptionRoutes from './routes/subscriptions';
+import { handleWebhook }  from './controllers/subscriptionController';
 
 const app    = express();
 const server = http.createServer(app);
@@ -76,6 +78,20 @@ app.use((req, res, next) => {
   next();
 });
 
+// ─── Razorpay Webhook (must receive RAW body for HMAC verification) ──────────
+// Mounted before express.json so the body isn't parsed/re-stringified before
+// we verify the signature against the original bytes.
+app.post(
+  '/api/subscriptions/webhook',
+  express.raw({ type: 'application/json', limit: '1mb' }),
+  (req, _res, next) => {
+    // Stash raw body for the controller, then continue.
+    (req as any).rawBody = req.body;
+    next();
+  },
+  handleWebhook,
+);
+
 // ─── Body Parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -88,18 +104,32 @@ if (process.env.NODE_ENV === 'development') {
 // ─── Static file serving (local upload fallback) ──────────────────────────────
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
+// ─── Public app assets (brand logo, etc.) ────────────────────────────────────
+// Used by Razorpay Checkout (image option) — must be loadable cross-origin.
+// Helmet's default Cross-Origin-Resource-Policy is 'same-origin' which blocks
+// Razorpay's hosted page from rendering the image, so we override it here.
+app.use(
+  '/static',
+  (_req, res, next) => {
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    next();
+  },
+  express.static(path.join(__dirname, '../public')),
+);
+
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // ─── API Routes ───────────────────────────────────────────────────────────────
-app.use('/api/auth',      authLimiter, authRoutes);
-app.use('/api/users',     userRoutes);
-app.use('/api/crossings', crossingRoutes);
-app.use('/api/matches',   matchRoutes);
-app.use('/api/messages',  messageRoutes);
-app.use('/api/safety',    safetyRoutes);
+app.use('/api/auth',          authLimiter, authRoutes);
+app.use('/api/users',         userRoutes);
+app.use('/api/crossings',     crossingRoutes);
+app.use('/api/matches',       matchRoutes);
+app.use('/api/messages',      messageRoutes);
+app.use('/api/safety',        safetyRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 
 // ─── Error Handling ───────────────────────────────────────────────────────────
 app.use(notFound);

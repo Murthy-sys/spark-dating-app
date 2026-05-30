@@ -11,6 +11,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiClient, persistAuth, clearAuth } from '../services/apiClient';
+import { useSubscriptionStore } from '../hooks/useSubscription';
 import { UserProfile } from '../types';
 
 /** Converts raw Axios errors into a human-readable string. */
@@ -54,6 +55,9 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       const { data } = await apiClient.get('/auth/me');
       set({ token, profile: data.user, isLoading: false });
+      // Hydrate subscription status alongside the user profile so paywall
+      // and Premium card know the right state on first render.
+      useSubscriptionStore.getState().refresh();
     } catch {
       await clearAuth();
       set({ token: null, profile: null, isLoading: false });
@@ -70,6 +74,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       });
       await persistAuth(data.token, data.user._id);
       set({ token: data.token, profile: data.user, isLoading: false });
+      useSubscriptionStore.getState().refresh();
     } catch (err: any) {
       const msg = parseApiError(err);
       set({ error: msg, isLoading: false });
@@ -84,6 +89,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const { data } = await apiClient.post('/auth/login', { email, password });
       await persistAuth(data.token, data.user._id);
       set({ token: data.token, profile: data.user, isLoading: false });
+      useSubscriptionStore.getState().refresh();
     } catch (err: any) {
       const msg = parseApiError(err);
       set({ error: msg, isLoading: false });
@@ -95,6 +101,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: async () => {
     await clearAuth();
     set({ token: null, profile: null });
+    useSubscriptionStore.getState().clear();
   },
 
   setProfile: (profile) => set({ profile }),

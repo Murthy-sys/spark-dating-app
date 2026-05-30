@@ -21,22 +21,14 @@ import {
   likeUser,
   passUser,
   starUser,
-  getDailyStatus,
-  DailyLimitError,
+  isSubscriptionRequired,
 } from '../../services/matchingService';
 import { useLocation } from '../../hooks/useLocation';
 import MatchModal from '../../components/MatchModal';
 import UserDetailModal from '../../components/UserDetailModal';
 import ProfileCardStack from '../../components/ProfileCardStack';
-import { DailyStatus, UserProfile } from '../../types';
-
-function hoursUntil(iso?: string): string {
-  if (!iso) return 'soon';
-  const ms = new Date(iso).getTime() - Date.now();
-  if (ms <= 0) return 'soon';
-  const h = Math.ceil(ms / 3_600_000);
-  return h <= 1 ? '1h' : `${h}h`;
-}
+import PaywallSheet from '../../components/PaywallSheet';
+import { UserProfile } from '../../types';
 
 type FeedItem  = { user: UserProfile; crossingCount: number; crossedAt: string };
 type MatchState = { user: UserProfile; matchId: string } | null;
@@ -50,14 +42,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [matchState, setMatchState] = useState<MatchState>(null);
   const [detailItem, setDetailItem] = useState<FeedItem | null>(null);
-  const [daily, setDaily]           = useState<DailyStatus | null>(null);
-
-  // Initial fetch of daily-pick budget; refreshed on every successful like.
-  useEffect(() => {
-    getDailyStatus().then(setDaily).catch(() => {});
-  }, []);
-
-  const limitReached = daily ? daily.remaining <= 0 : false;
+  const [paywall, setPaywall]       = useState<'star' | null>(null);
 
   const loadFeed = useCallback(async () => {
     if (!profile) return;
@@ -97,29 +82,15 @@ export default function HomeScreen() {
   };
 
   const handleLike = async (item: FeedItem, isCrush = false) => {
-    if (limitReached) {
-      Alert.alert(
-        'Daily picks used',
-        `You've used all ${daily?.limit ?? 10} picks for today. Come back in ${hoursUntil(daily?.resetAt)}.`,
-      );
-      return;
-    }
     try {
-      const { isMatch, matchId, daily: d } = await likeUser(
+      const { isMatch, matchId } = await likeUser(
         item.user._id,
         isCrush ? 'crushed' : 'liked',
       );
-      if (d) setDaily(d);
       handleRemove(item.user._id);
       setDetailItem(null);
       if (isMatch && matchId) handleMatch(item.user, matchId);
     } catch (err) {
-      if (err instanceof DailyLimitError) {
-        // Refresh local state from server-truth so UI locks immediately
-        setDaily({ used: 10, limit: 10, remaining: 0, resetAt: err.resetAt });
-        Alert.alert('Daily picks used', err.message);
-        return;
-      }
       Alert.alert('Error', 'Could not send like. Please try again.');
     }
   };
@@ -131,17 +102,15 @@ export default function HomeScreen() {
   };
 
   const handleStar = async (item: FeedItem) => {
-    if (limitReached) {
-      Alert.alert(
-        'Daily picks used',
-        `Crushes count toward your daily limit. Come back in ${hoursUntil(daily?.resetAt)}.`,
-      );
-      return;
-    }
     try {
       await starUser(item.user._id);
       await handleLike(item, true);
-    } catch {
+    } catch (err: any) {
+      if (isSubscriptionRequired(err)) {
+        setDetailItem(null);
+        setPaywall('star');
+        return;
+      }
       Alert.alert('Error', 'Could not star user.');
     }
   };
@@ -191,17 +160,6 @@ export default function HomeScreen() {
         </View>
       ) : null}
 
-      {/* Daily picks banner — anchors the no-swipe model */}
-      {daily && (
-        <View style={[styles.dailyBanner, limitReached && styles.dailyBannerLocked]}>
-          <Text style={styles.dailyBannerText}>
-            {limitReached
-              ? `🔒 You've used all ${daily.limit} picks today — resets in ${hoursUntil(daily.resetAt)}`
-              : `${daily.remaining} of ${daily.limit} picks left today`}
-          </Text>
-        </View>
-      )}
-
       {feed.length === 0 && !loading ? (
         <View style={styles.empty}>
           <Text style={styles.emptyEmoji}>🚶</Text>
@@ -213,7 +171,7 @@ export default function HomeScreen() {
       ) : (
         <ProfileCardStack
           items={safeFeed}
-          disabled={limitReached}
+          disabled={false}
           onTap={(item) => setDetailItem(item)}
           onLike={(item) => handleLike(item)}
           onPass={(item) => handlePass(item)}
@@ -243,6 +201,13 @@ export default function HomeScreen() {
           onClose={() => setMatchState(null)}
         />
       )}
+
+      {/* Paywall (premium gate for stars / likes-received) */}
+      <PaywallSheet
+        visible={paywall !== null}
+        feature={paywall ?? 'star'}
+        onClose={() => setPaywall(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -269,22 +234,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   locationWarningText: { fontSize: 13, color: '#856404', textAlign: 'center' },
-
-  // Daily picks banner — anchors the no-swipe model
-  dailyBanner: {
-    backgroundColor: '#FFF0F4',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    alignItems: 'center',
-  },
-  dailyBannerLocked: {
-    backgroundColor: '#F0E6E8',
-  },
-  dailyBannerText: {
-    fontSize: 13,
-    color: '#FF4B6E',
-    fontWeight: '600',
-  },
 
   empty: {
     flex: 1,

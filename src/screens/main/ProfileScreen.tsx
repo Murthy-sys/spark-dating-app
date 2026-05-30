@@ -31,7 +31,9 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { Modal } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useAuthStore } from '../../store/authStore';
+import { useSubscription } from '../../hooks/useSubscription';
 import { updateUserProfile, uploadProfilePhoto } from '../../services/userService';
 import { submitVerification } from '../../services/safetyService';
 import PreferencesModal from '../../components/PreferencesModal';
@@ -99,7 +101,9 @@ function MenuRow({
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function ProfileScreen() {
+  const navigation = useNavigation<any>();
   const { profile, setProfile, logout } = useAuthStore();
+  const { isActive: isPremium, subscription } = useSubscription();
 
   const [editing,        setEditing]        = useState(false);
   const [bio,            setBio]            = useState(profile?.bio || '');
@@ -402,33 +406,45 @@ export default function ProfileScreen() {
         )}
 
         {/* ── Spark Premium card ── */}
-        <View style={[st.premiumCard, { marginBottom: 14 }]}>
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => navigation.navigate('Subscription' as never)}
+          style={[st.premiumCard, { marginBottom: 14 }]}
+        >
           <Text style={st.premiumTitle}>Spark Premium</Text>
-          <View style={st.premiumFeatures}>
-            {[
-              'See who likes your profile',
-              'Send unlimited likes',
-              '5 free SuperCrushes every day',
-            ].map((f) => (
-              <View key={f} style={st.featureRow}>
-                <Ionicons name="checkmark" size={16} color={BRAND} style={{ marginRight: 8 }} />
-                <Text style={st.featureText}>{f}</Text>
+          {isPremium ? (
+            <>
+              <View style={st.premiumActiveRow}>
+                <Ionicons name="checkmark-circle" size={18} color={BRAND} style={{ marginRight: 6 }} />
+                <Text style={st.premiumActiveText}>Premium active</Text>
               </View>
-            ))}
-          </View>
-          <TouchableOpacity
-            onPress={() => comingSoon('Spark Premium')}
-            activeOpacity={0.8}
-          >
-            <Text style={st.premiumSeeMore}>See my features</Text>
-          </TouchableOpacity>
-          <View style={st.premiumActiveRow}>
-            <Ionicons name="checkmark-circle" size={18} color={BRAND} style={{ marginRight: 6 }} />
-            <Text style={st.premiumActiveText}>Coming soon</Text>
-          </View>
+              {subscription?.currentEnd && (
+                <Text style={[st.featureText, { marginTop: 8, opacity: 0.7 }]}>
+                  Renews {new Date(subscription.currentEnd).toLocaleDateString()}
+                </Text>
+              )}
+              <Text style={st.premiumSeeMore}>Manage subscription →</Text>
+            </>
+          ) : (
+            <>
+              <View style={st.premiumFeatures}>
+                {[
+                  'See who likes your profile',
+                  'Send unlimited stars',
+                  'Unlimited likes (free for everyone)',
+                ].map((f) => (
+                  <View key={f} style={st.featureRow}>
+                    <Ionicons name="checkmark" size={16} color={BRAND} style={{ marginRight: 8 }} />
+                    <Text style={st.featureText}>{f}</Text>
+                  </View>
+                ))}
+              </View>
+              <Text style={st.premiumSeeMore}>Subscribe →</Text>
+            </>
+          )}
           {/* decorative swirl */}
           <Text style={st.swirl}>✦</Text>
-        </View>
+        </TouchableOpacity>
 
         {/* ── My Boosts card ── */}
         <Card style={{ marginBottom: 10 }}>

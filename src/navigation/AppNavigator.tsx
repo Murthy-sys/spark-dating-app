@@ -26,12 +26,13 @@ import ForgotPasswordScreen from '../screens/auth/ForgotPasswordScreen';
 import SetupProfileScreen from '../screens/onboarding/SetupProfileScreen';
 
 // Main Screens
-import HomeScreen     from '../screens/main/HomeScreen';
-import LikesScreen    from '../screens/main/LikesScreen';
-import ChatListScreen from '../screens/main/ChatListScreen';
-import ChatScreen     from '../screens/main/ChatScreen';
-import ProfileScreen  from '../screens/main/ProfileScreen';
-import LikeNotification from '../components/LikeNotification';
+import HomeScreen         from '../screens/main/HomeScreen';
+import LikesScreen        from '../screens/main/LikesScreen';
+import ChatListScreen     from '../screens/main/ChatListScreen';
+import ChatScreen         from '../screens/main/ChatScreen';
+import ProfileScreen      from '../screens/main/ProfileScreen';
+import SubscriptionScreen from '../screens/main/SubscriptionScreen';
+import LikeNotification   from '../components/LikeNotification';
 
 import {
   RootStackParamList,
@@ -255,7 +256,10 @@ export default function AppNavigator() {
         ) : !hasCompletedSetup ? (
           <RootStack.Screen name="Onboarding" component={OnboardingNavigator} options={{ animation: 'fade' }} />
         ) : (
-          <RootStack.Screen name="Main" component={MainNavigator} options={{ animation: 'fade' }} />
+          <>
+            <RootStack.Screen name="Main"         component={MainNavigator}       options={{ animation: 'fade' }} />
+            <RootStack.Screen name="Subscription" component={SubscriptionScreen}  options={{ animation: 'slide_from_bottom', presentation: 'modal' }} />
+          </>
         )}
       </RootStack.Navigator>
     </NavigationContainer>

@@ -14,7 +14,15 @@ import { DailyStatus, LikeStatus, Match, UserProfile } from '../types';
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
-/** Thrown when the user has used all DAILY_LIKE_LIMIT picks for the day. */
+/** Thrown when a premium-only endpoint is hit without an active subscription. */
+export class SubscriptionRequiredError extends Error {
+  constructor(message = 'Spark Premium subscription required') {
+    super(message);
+    this.name = 'SubscriptionRequiredError';
+  }
+}
+
+/** Legacy: kept exported so older imports don't break. No longer thrown. */
 export class DailyLimitError extends Error {
   resetAt: string;
   constructor(message: string, resetAt: string) {
@@ -22,6 +30,15 @@ export class DailyLimitError extends Error {
     this.name    = 'DailyLimitError';
     this.resetAt = resetAt;
   }
+}
+
+/** True if the error came from the SUBSCRIPTION_REQUIRED 402 paywall. */
+export function isSubscriptionRequired(err: any): boolean {
+  return (
+    err?.response?.status === 402 ||
+    err?.response?.data?.code === 'SUBSCRIPTION_REQUIRED' ||
+    err instanceof SubscriptionRequiredError
+  );
 }
 
 // ─── Crossed-Paths Feed ───────────────────────────────────────────────────────
@@ -55,24 +72,12 @@ export async function getNearbyUsers(
 export async function likeUser(
   toUserId: string,
   status: LikeStatus = 'liked'
-): Promise<{ isMatch: boolean; matchId?: string; daily?: DailyStatus }> {
-  try {
-    const { data } = await apiClient.post(`/matches/like/${toUserId}`, { status });
-    return {
-      isMatch: data.isMatch as boolean,
-      matchId: data.matchId as string | undefined,
-      daily:   data.daily   as DailyStatus | undefined,
-    };
-  } catch (err: any) {
-    const code = err?.response?.data?.code;
-    if (code === 'DAILY_LIMIT_REACHED') {
-      throw new DailyLimitError(
-        err.response.data.message ?? 'Daily limit reached',
-        err.response.data.resetAt,
-      );
-    }
-    throw err;
-  }
+): Promise<{ isMatch: boolean; matchId?: string }> {
+  const { data } = await apiClient.post(`/matches/like/${toUserId}`, { status });
+  return {
+    isMatch: data.isMatch as boolean,
+    matchId: data.matchId as string | undefined,
+  };
 }
 
 /**

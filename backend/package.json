@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "dev:tunnel": "ts-node-dev --respawn --transpile-only tunnel.ts",
+    "dev:tunnel:ngrok": "ts-node-dev --respawn --transpile-only tunnel-ngrok.ts",
     "clear-db": "npx ts-node clear-db.ts",
+    "seed-plans": "npx ts-node seed-plans.ts",
+    "wipe-subs": "npx ts-node wipe-subs.ts",
     "build": "tsc",
     "start": "node dist/server.js"
   },
@@ -24,6 +27,7 @@
     "morgan": "^1.10.0",
     "multer": "^1.4.5-lts.1",
     "nodemailer": "^8.0.4",
+    "razorpay": "^2.9.6",
     "socket.io": "^4.7.5",
     "streamifier": "^0.1.1"
   },
@@ -38,6 +42,7 @@
     "@types/node": "^20.14.2",
     "@types/nodemailer": "^7.0.11",
     "localtunnel": "^2.0.2",
+    "ngrok": "^5.0.0-beta.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
   }

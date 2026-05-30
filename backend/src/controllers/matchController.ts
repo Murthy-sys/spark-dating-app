@@ -5,32 +5,9 @@ import User from '../models/User';
 import { AuthRequest } from '../middleware/auth';
 import { getIO } from '../socket';
 import {
-  DAILY_LIKE_LIMIT,
   AUTO_UNMATCH_MS,
   ENGAGE_GHOSTED,
-  nextMidnight,
 } from '../constants/limits';
-
-// ─── Daily-like accounting ────────────────────────────────────────────────────
-
-/**
- * Returns the user's current daily-like state, resetting the counter when the
- * window has rolled over. Persists the reset so the next read is cheap.
- */
-async function consumeDailyState(userId: any) {
-  const me = await User.findById(userId).select(
-    'dailyLikesUsed dailyLikesResetAt'
-  );
-  if (!me) throw new Error('User not found');
-
-  const now = new Date();
-  if (!me.dailyLikesResetAt || me.dailyLikesResetAt <= now) {
-    me.dailyLikesUsed    = 0;
-    me.dailyLikesResetAt = nextMidnight(now);
-    await me.save({ validateBeforeSave: false });
-  }
-  return me;
-}
 
 // ─── Auto-unmatch sweep (lazy, runs on getMatches) ────────────────────────────
 
@@ -89,21 +66,8 @@ export async function likeUser(req: AuthRequest, res: Response, next: NextFuncti
       return res.status(400).json({ success: false, message: 'Cannot like yourself' });
     }
 
-    // Daily limit only applies to positive actions, not 'passed'
-    if (status === 'liked' || status === 'crushed') {
-      const me = await consumeDailyState(myId);
-      if (me.dailyLikesUsed >= DAILY_LIKE_LIMIT) {
-        return res.status(429).json({
-          success:  false,
-          code:     'DAILY_LIMIT_REACHED',
-          message:  `You've used all ${DAILY_LIKE_LIMIT} daily picks. Come back tomorrow!`,
-          resetAt:  me.dailyLikesResetAt,
-        });
-      }
-      // Increment FIRST so concurrent calls can't overshoot
-      me.dailyLikesUsed += 1;
-      await me.save({ validateBeforeSave: false });
-    }
+    // Likes are unlimited for all users — premium subscription unlocks
+    // "see who liked me" and stars instead of capping likes.
 
     // Upsert the like record
     await Like.findOneAndUpdate(
@@ -153,18 +117,10 @@ export async function likeUser(req: AuthRequest, res: Response, next: NextFuncti
       isMatch = true;
     }
 
-    // Surface the updated daily state so the client can refresh its counter
-    const meAfter = await User.findById(myId).select('dailyLikesUsed dailyLikesResetAt');
     res.json({
       success: true,
       isMatch,
       matchId: match?._id,
-      daily: {
-        used:      meAfter?.dailyLikesUsed ?? 0,
-        limit:     DAILY_LIKE_LIMIT,
-        remaining: Math.max(0, DAILY_LIKE_LIMIT - (meAfter?.dailyLikesUsed ?? 0)),
-        resetAt:   meAfter?.dailyLikesResetAt,
-      },
     });
   } catch (err) {
     next(err);
@@ -172,16 +128,18 @@ export async function likeUser(req: AuthRequest, res: Response, next: NextFuncti
 }
 
 // ─── Daily-Status Endpoint ────────────────────────────────────────────────────
+// Kept for backward compatibility with older clients. Likes are now unlimited;
+// we report a sentinel `unlimited: true` instead of a counter.
 
-export async function getDailyStatus(req: AuthRequest, res: Response, next: NextFunction) {
+export async function getDailyStatus(_req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const me = await consumeDailyState(req.user!._id);
     res.json({
       success:   true,
-      used:      me.dailyLikesUsed,
-      limit:     DAILY_LIKE_LIMIT,
-      remaining: Math.max(0, DAILY_LIKE_LIMIT - me.dailyLikesUsed),
-      resetAt:   me.dailyLikesResetAt,
+      unlimited: true,
+      used:      0,
+      limit:     null,
+      remaining: null,
+      resetAt:   null,
     });
   } catch (err) {
     next(err);
